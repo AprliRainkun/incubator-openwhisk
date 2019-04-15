@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.apache.openwhisk.grpc";
+
+package activation;
+
+service ActivationQueue {
+    rpc Fetch(stream WindowAdvertisement) returns (stream FetchResponse) {}
+
+    rpc Put(Activation) returns (PutActivationResponse) {}
+
+    rpc Create(CreateQueue) returns (CreateQueueResponse) {}
+}
+
+message Activation {
+    TransactionId tid = 1;
+    string actionName = 2;
+    bytes payload = 3;
+}
+
+message TransactionId {
+    string id = 1;
+}
+
+message PutActivationResponse {
+    ResponseStatus status = 1;
+}
+
+message ResponseStatus {
+    int32 statusCode = 1;
+    string message = 2;
+}
+
+message WindowAdvertisement {
+    string actionName = 1;
+    int32 windowsSize = 2;
+}
+
+message FetchResponse {
+    ResponseStatus status = 1;
+    Activation activation = 2;
+}
+
+message CreateQueue {
+    TransactionId tid = 1;
+    string actionName = 2;
+}
+
+message CreateQueueResponse {
+    ResponseStatus status = 1;
+    string endpoint= 2;
+}
