@@ -113,6 +113,11 @@ ext.testSets = [
             "system/basic/WskMultiRuntimeTests*",
             "invokerShoot/**"
         ]
+    ],
+    "SCHEDULER_ONLY": [
+        "includes": [
+            "org/apache/openwhisk/core/scheduler/test/**"
+        ]
     ]
 ]
 
@@ -179,6 +184,10 @@ task testUnit(type: Test) {
     exclude couchDbExcludes
 }
 
+configurations {
+    alpnagent
+}
+
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
     compile 'org.apache.commons:commons-lang3:3.3.2'
@@ -199,8 +208,12 @@ dependencies {
 
     compile "com.amazonaws:aws-java-sdk-s3:1.11.295"
 
+    // Configuration for modules that use Jetty ALPN agent
+    alpnagent 'org.mortbay.jetty.alpn:jetty-alpn-agent:2.0.9'
+
     compile project(':common:scala')
     compile project(':core:controller')
+    compile project(':core:scheduler')
     compile project(':core:invoker')
     compile project(':tools:admin')
 
@@ -209,6 +222,11 @@ dependencies {
     scoverage gradle.scoverage.deps
 
     swaggerCodegen 'io.swagger:swagger-codegen-cli:2.3.1'
+}
+
+task testScheduler(type: Test) {
+    include getPattern("SCHEDULER_ONLY", "includes")
+    jvmArgs '-javaagent:' + configurations.alpnagent.asPath
 }
 
 tasks.withType(ScalaCompile) {
