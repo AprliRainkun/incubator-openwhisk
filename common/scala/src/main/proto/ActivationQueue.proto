@@ -6,11 +6,14 @@ option java_package = "org.apache.openwhisk.grpc";
 package activation;
 
 service QueueService {
-    rpc Fetch(stream WindowAdvertisement) returns (stream FetchResponse) {}
+    rpc Fetch (stream WindowAdvertisement) returns (stream FetchResponse) {
+    }
 
-    rpc Put(Activation) returns (PutActivationResponse) {}
+    rpc Put (Activation) returns (PutActivationResponse) {
+    }
 
-    rpc Create(CreateQueue) returns (CreateQueueResponse) {}
+    rpc Create (CreateQueue) returns (CreateQueueResponse) {
+    }
 }
 
 message Activation {
@@ -49,5 +52,5 @@ message CreateQueue {
 
 message CreateQueueResponse {
     ResponseStatus status = 1;
-    string endpoint= 2;
+    string endpoint = 2;
 }
