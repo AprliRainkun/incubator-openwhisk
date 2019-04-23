@@ -19,7 +19,7 @@ class QueueServiceDraftImpl(implicit mat: Materializer) extends QueueService {
     })
   }
 
-  override def create(in: CreateQueue): Future[CreateQueueResponse] = {
+  override def create(in: CreateQueueRequest): Future[CreateQueueResponse] = {
     println(s"create request received for action ${in.actionName}")
     Future.successful(CreateQueueResponse(Option(ok), "this.cluster"))
   }
