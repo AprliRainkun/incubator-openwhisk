@@ -13,7 +13,7 @@ import akka.testkit.{TestKit, TestProbe}
 import org.apache.openwhisk.grpc._
 import org.apache.openwhisk.core.scheduler._
 
-import scala.concurrent.{ExecutionContext, Await}
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
 
 @RunWith(classOf[JUnitRunner])
@@ -22,15 +22,15 @@ class GrpcSetupTests
     with WordSpecLike
     with Matchers
     with BeforeAndAfterAll {
-  private val local = "127.0.0.1"
-  private val port = 8899
+  val local = "127.0.0.1"
+  val port = 8899
 
   implicit val sys: ActorSystem = system
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
 
   override def beforeAll(): Unit = {
-    new QueueServiceServer(system).run(local, port)
+    new QueueServiceServer(new QueueServiceDraftImpl()).run(local, port)
   }
 
   override def afterAll(): Unit = {
@@ -57,16 +57,16 @@ class GrpcSetupTests
 
       val resp = Await.result(client.put(act), 3.seconds)
 
-      resp.status.value.statusCode should be (200)
+      resp.status.value.statusCode should be(200)
     }
 
     "expose its create method" in {
       val tid = TransactionId("#tid_000")
-      val act = CreateQueue(Option(tid), "ns/pkg/act")
+      val act = CreateQueueRequest(Option(tid), "ns/pkg/act")
 
       val resp = Await.result(client.create(act), 3.seconds)
 
-      resp.status.value.statusCode should be (200)
+      resp.status.value.statusCode should be(200)
     }
   }
 

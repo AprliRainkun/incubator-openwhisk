@@ -12,7 +12,7 @@ service QueueService {
     rpc Put (Activation) returns (PutActivationResponse) {
     }
 
-    rpc Create (CreateQueue) returns (CreateQueueResponse) {
+    rpc Create (CreateQueueRequest) returns (CreateQueueResponse) {
     }
 }
 
@@ -45,7 +45,7 @@ message FetchResponse {
     Activation activation = 2;
 }
 
-message CreateQueue {
+message CreateQueueRequest {
     TransactionId tid = 1;
     string actionName = 2;
 }
