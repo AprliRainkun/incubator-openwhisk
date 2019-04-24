@@ -10,12 +10,13 @@ import com.google.protobuf.ByteString
 import org.apache.openwhisk.grpc.etcd.WatchRequest.RequestUnion
 import org.apache.openwhisk.grpc.etcd._
 import org.apache.openwhisk.grpc.mvccpb.Event
+import org.apache.openwhisk.core.database.etcd.Utils.rangeEndOfPrefix
 import org.junit.runner.RunWith
 import org.scalatest.OptionValues._
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 @RunWith(classOf[JUnitRunner])
@@ -56,6 +57,31 @@ class EtcdClientTests
     }
   }
 
+  it should {
+    "correctly handle prefix get with trailing slash" in {
+      val prefix = entityPrefix + "trailingSlash/"
+
+      val data = (0 to 2) map { i =>
+        (prefix + i.toString, s"value$i")
+      }
+
+      for {
+        _ <- Future.traverse(data) {
+          case (k, v) =>
+            val req = PutRequest(key = k.toByteString, value = v.toByteString)
+            kvClient.put(req)
+        }
+        req = RangeRequest(key = prefix.toByteString, rangeEnd = rangeEndOfPrefix(prefix.toByteString))
+        resp <- kvClient.range(req)
+      } yield {
+        val (foundKeys, foundValues) = resp.kvs.map(kv => (kv.key.toStringUtf8, kv.value.toStringUtf8)).unzip
+
+        foundKeys should be(data.map(_._1))
+        foundValues should be(data.map(_._2))
+      }
+    }
+  }
+
   "etcd watch client" should {
     "observe sequential key changes" in {
       val key = (entityPrefix + "watchObserve").toByteString
@@ -82,12 +108,12 @@ class EtcdClientTests
         kvClient.put(PutRequest(key = key, value = v))
         val r = respProbe.expectMsgType[WatchResponse](3.seconds)
 
-        r.events.size should be (1)
+        r.events.size should be(1)
 
         val e = r.events.head
-        e.`type` should be (Event.EventType.PUT)
-        e.kv.value.key should be (key)
-        e.kv.value.value should be (v)
+        e.`type` should be(Event.EventType.PUT)
+        e.kv.value.key should be(key)
+        e.kv.value.value should be(v)
       }
 
       // cancel watch
@@ -102,7 +128,12 @@ class EtcdClientTests
   }
 
   override def afterAll(): Unit = {
-    system.terminate()
+    val prefix = entityPrefix.toByteString
+    val req = DeleteRangeRequest(key = prefix, rangeEnd = rangeEndOfPrefix(prefix))
+    val fut = kvClient.deleteRange(req) map { _ =>
+      system.terminate()
+    }
+    Await.result(fut, 5.seconds)
   }
 
   private def feedAndSource[T] = {
