@@ -7,20 +7,30 @@ import akka.pattern.ask
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import org.apache.openwhisk.grpc._
+import org.apache.openwhisk.core.database.etcd._
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
 import scala.concurrent.{ExecutionContext, Future}
 import QueueManager.{CreateQueue, QueueCreated}
+import akka.grpc.GrpcClientSettings
 
-class RPCEndpoint(queueManager: ActorRef)(implicit mat: Materializer, ctx: ExecutionContext) extends QueueService {
+class RPCEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClientSettings,
+                                          schedulerConfig: SchedulerConfig,
+                                          mat: Materializer,
+                                          ctx: ExecutionContext)
+    extends QueueService {
+
+  private val metadataStore = QueueMetadataStore.connect(etcdClientSettings)
+
   override def create(in: CreateQueueRequest): Future[CreateQueueResponse] = {
-    implicit val timeout: Timeout = Timeout(3 second)
+    implicit val timeout: Timeout = Timeout(5 second)
 
-    queueManager ? CreateQueue(in.actionName) map { r =>
-      r.asInstanceOf[QueueCreated]
-    } map { created =>
-      CreateQueueResponse(Option(ok), created.endpoint)
+    for {
+      _ <- (queueManager ? CreateQueue(in.actionName)).mapTo[QueueCreated]
+      _ <- metadataStore.txnWriteEndpoint(in.actionName, schedulerConfig.endpoint)
+    } yield {
+      CreateQueueResponse(Option(ok), schedulerConfig.endpoint)
     }
   }
 
