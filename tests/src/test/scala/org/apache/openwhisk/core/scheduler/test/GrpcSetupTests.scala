@@ -3,7 +3,7 @@ package org.apache.openwhisk.core.scheduler.test
 import com.google.protobuf.ByteString
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
+import org.scalatest.{BeforeAndAfterAll, Matchers, AsyncWordSpecLike}
 import org.scalatest.OptionValues._
 import akka.actor.ActorSystem
 import akka.grpc.GrpcClientSettings
@@ -19,7 +19,7 @@ import scala.concurrent.duration._
 @RunWith(classOf[JUnitRunner])
 class GrpcSetupTests
     extends TestKit(ActorSystem("GrpcSetupTest"))
-    with WordSpecLike
+    with AsyncWordSpecLike
     with Matchers
     with BeforeAndAfterAll {
   val local = "127.0.0.1"
@@ -49,6 +49,8 @@ class GrpcSetupTests
         val resp = probe.expectMsgType[FetchResponse](3.seconds)
         resp.status.map(_.statusCode) should be(Option(200))
       }
+
+      succeed
     }
 
     "expose its put method" in {

@@ -21,7 +21,7 @@ class RPCEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
                                           ctx: ExecutionContext)
     extends QueueService {
 
-  private val metadataStore = QueueMetadataStore.connect(etcdClientSettings)
+  private val metadataStore = QueueMetadataStore.connect(schedulerConfig.queueMetadataStoreConfig, etcdClientSettings)
 
   override def create(in: CreateQueueRequest): Future[CreateQueueResponse] = {
     implicit val timeout: Timeout = Timeout(5 second)

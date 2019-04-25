@@ -7,20 +7,23 @@ import org.apache.openwhisk.grpc.etcd._
 
 import scala.concurrent.{ExecutionContext, Future}
 
+final case class QueueMetadataStoreConfig(markerKeyTemplate: String, endpointKeyTemplate: String)
+
 object QueueMetadataStore {
-  def connect(settings: GrpcClientSettings)(implicit mat: Materializer, ex: ExecutionContext) =
-    new QueueMetadataStore(KVClient(settings))
+  def connect(config: QueueMetadataStoreConfig, settings: GrpcClientSettings)(implicit mat: Materializer,
+                                                                              ex: ExecutionContext) =
+    new QueueMetadataStore(config, KVClient(settings))
 }
 
-class QueueMetadataStore(kvClient: KVClient) {
+class QueueMetadataStore(config: QueueMetadataStoreConfig, kvClient: KVClient) {
   def txnMarkCreating(actionName: String): Future[Unit] = {
-    val _ = s"queue/$actionName/creating"
+    val _ = config.markerKeyTemplate.format(actionName)
     //TODO: implement check
     Future.successful(())
   }
 
   def txnWriteEndpoint(actionName: String, endpoint: String)(implicit ctx: ExecutionContext): Future[Unit] = {
-    val key = s"queue/$actionName/endpoint"
+    val key = config.endpointKeyTemplate.format(actionName)
     val req = PutRequest(key = ByteString.copyFromUtf8(key), value = ByteString.copyFromUtf8(endpoint))
 
     kvClient.put(req).map(_ => ())
