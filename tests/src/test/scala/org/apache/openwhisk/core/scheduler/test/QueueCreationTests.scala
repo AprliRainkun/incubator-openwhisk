@@ -30,7 +30,7 @@ class QueueCreationTests extends TestBase("QueueCreationTests") {
   "Queue creation service" should {
     "be reachable" in {
       val tid = TransactionId("#tid_000")
-      val req = CreateQueueRequest(Option(tid), "ns/pkg/act")
+      val req = CreateQueueRequest(Some(tid), "ns/pkg/act")
 
       schedulerClient.create(req) map { resp =>
         resp.status.value.statusCode should be(200)
@@ -41,7 +41,7 @@ class QueueCreationTests extends TestBase("QueueCreationTests") {
     "create a queue and write endpoint to etcd" in {
       val actionName = "ns/pkg/act2"
       val tid = TransactionId("#tid_000")
-      val req = CreateQueueRequest(Option(tid), actionName)
+      val req = CreateQueueRequest(Some(tid), actionName)
 
       schedulerClient.create(req) flatMap { resp =>
         resp.status.value.statusCode should be(200)
@@ -62,7 +62,7 @@ class QueueCreationTests extends TestBase("QueueCreationTests") {
 
     val manager = system.actorOf(QueueManager.props(etcdSettings, schedulerConfig))
 
-    val srv = new QueueServiceServer(new RPCEndpoint(manager)).run(local, schedulerPort)
+    val srv = new QueueServiceServer(new RpcEndpoint(manager)).run(local, schedulerPort)
     Await.result(srv, 5.seconds)
   }
 

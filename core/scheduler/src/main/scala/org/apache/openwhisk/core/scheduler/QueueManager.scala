@@ -12,6 +12,16 @@ object QueueManager {
 
   final case class CreateQueue(name: String)
   final case class QueueCreated()
+
+  final case class AppendActivation(dummyActivation: DummyActivation)
+
+  sealed abstract class AppendResponse
+  final case object Succeed extends AppendResponse
+  final case object QueueNotExist extends AppendResponse
+  final case object QueueTooLong extends AppendResponse
+
+  final case class FetchActivation(name: String, window: Int)
+
 }
 
 class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) extends Actor {
@@ -27,5 +37,11 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
       val queue = context.actorOf(Queue.props(name))
       queues = queues + (name -> queue)
       sender ! QueueCreated()
+    case msg @ AppendActivation(act) =>
+      queues.get(act.action) match {
+        case Some(queue) => queue forward msg
+        case None =>
+          sender ! QueueNotExist
+      }
   }
 }
