@@ -7,17 +7,17 @@ import akka.stream.testkit.scaladsl.TestSource
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{TestKit, TestProbe}
 import com.google.protobuf.ByteString
+import org.apache.openwhisk.core.database.etcd.Utils.rangeEndOfPrefix
 import org.apache.openwhisk.grpc.etcd.WatchRequest.RequestUnion
 import org.apache.openwhisk.grpc.etcd._
 import org.apache.openwhisk.grpc.mvccpb.Event
-import org.apache.openwhisk.core.database.etcd.Utils.rangeEndOfPrefix
 import org.junit.runner.RunWith
 import org.scalatest.OptionValues._
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
 
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 @RunWith(classOf[JUnitRunner])
 class EtcdClientTests

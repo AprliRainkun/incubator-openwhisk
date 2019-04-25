@@ -1,3 +1,7 @@
 package org.apache.openwhisk.core.scheduler
 
-final case class SchedulerConfig(endpoint: String)
+import org.apache.openwhisk.core.database.etcd.QueueMetadataStoreConfig
+
+final case class SchedulerConfig(endpoint: String,
+                                 queueMetadataStoreConfig: QueueMetadataStoreConfig =
+                                   QueueMetadataStoreConfig("queue/%s/creating", "queue/$s/endpoint"))
