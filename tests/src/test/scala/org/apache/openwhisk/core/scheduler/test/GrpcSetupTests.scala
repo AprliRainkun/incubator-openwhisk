@@ -46,7 +46,7 @@ class GrpcSetupTests
       activations.to(Sink.actorRef(probe.ref, "completed")).run()
 
       0 to 3 foreach { _ =>
-        val resp = probe.expectMsgType[FetchResponse](3.seconds)
+        val resp = probe.expectMsgType[FetchActivationResponse](3.seconds)
         resp.status.map(_.statusCode) should be(Option(200))
       }
 
