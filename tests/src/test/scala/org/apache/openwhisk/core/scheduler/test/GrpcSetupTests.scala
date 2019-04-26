@@ -3,7 +3,7 @@ package org.apache.openwhisk.core.scheduler.test
 import com.google.protobuf.ByteString
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-import org.scalatest.{BeforeAndAfterAll, Matchers, AsyncWordSpecLike}
+import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
 import org.scalatest.OptionValues._
 import akka.actor.ActorSystem
 import akka.grpc.GrpcClientSettings
@@ -39,7 +39,10 @@ class GrpcSetupTests
 
   "Queue service server" should {
     "expose its fetch method" in {
-      val windows = (0 to 3).map(_ => WindowAdvertisement("ns/pkg/act", 1))
+      import WindowAdvertisement.Message.{ActionName, WindowsSize}
+
+      val windows = WindowAdvertisement(ActionName("ns/pkg/act")) ::
+        List.fill(3)(WindowAdvertisement(WindowsSize(1)))
       val activations = client.fetch(Source(windows))
       val probe = TestProbe()
 

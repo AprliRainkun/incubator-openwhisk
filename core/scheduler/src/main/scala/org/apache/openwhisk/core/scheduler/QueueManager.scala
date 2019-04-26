@@ -1,10 +1,18 @@
 package org.apache.openwhisk.core.scheduler
 
+import akka.NotUsed
 import akka.actor.{Actor, ActorRef, Props}
 import akka.grpc.GrpcClientSettings
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.grpc.WindowAdvertisement.Message
+import org.apache.openwhisk.grpc.{FetchActivationResponse, WindowAdvertisement}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
+
+sealed abstract class QueueOperationError
+case object QueueNotExist extends QueueOperationError
+case object Overloaded extends QueueOperationError
 
 object QueueManager {
   def props(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) =
@@ -15,20 +23,18 @@ object QueueManager {
 
   final case class AppendActivation(dummyActivation: DummyActivation)
 
-  sealed abstract class AppendResponse
-  final case object Succeed extends AppendResponse
-  final case object QueueNotExist extends AppendResponse
-  final case object QueueTooLong extends AppendResponse
+  type AppendResult = Either[QueueOperationError, Unit]
 
-  final case class FetchActivation(name: String, window: Int)
-
+  final case class EstablishFetchStream(windows: Source[WindowAdvertisement, NotUsed])
+  final case class FetchStream(activations: Source[DummyActivation, NotUsed])
+  type EstablishResult = Either[QueueOperationError, FetchStream]
 }
 
 class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) extends Actor {
   import QueueManager._
 
   implicit val mat: Materializer = ActorMaterializer()
-  implicit val ex: ExecutionContext = context.system.dispatcher
+  implicit val ex: ExecutionContext = context.dispatcher
 
   private var queues = Map.empty[String, ActorRef]
 
@@ -41,7 +47,21 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
       queues.get(act.action) match {
         case Some(queue) => queue forward msg
         case None =>
-          sender ! QueueNotExist
+          sender ! Left(QueueNotExist)
       }
+    case EstablishFetchStream(windows) =>
+      val currentSender = sender()
+
+      windows.prefixAndTail(1).toMat(Sink.head)(Keep.right).run() map {
+        case (first, remaining) =>
+          // todo: warn when actionName is absent (default to "")
+          val name = first.head.getActionName
+          // todo: race?
+          queues.get(name) match {
+            case Some(queue) => queue forward EstablishFetchStream(remaining)
+            case None        => currentSender ! Left(QueueNotExist)
+          }
+      }
+
   }
 }

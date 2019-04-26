@@ -36,8 +36,10 @@ message ResponseStatus {
 }
 
 message WindowAdvertisement {
-    string actionName = 1;
-    int32 windowsSize = 2;
+    oneof message {
+        string actionName = 1;
+        int32 windowsSize = 2;
+    }
 }
 
 message FetchActivationResponse {
