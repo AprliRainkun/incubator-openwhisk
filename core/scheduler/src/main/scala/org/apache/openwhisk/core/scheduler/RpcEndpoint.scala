@@ -13,7 +13,7 @@ import org.apache.openwhisk.core.scheduler.QueueManager._
 import org.apache.openwhisk.grpc._
 
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
 
 class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClientSettings,
@@ -56,8 +56,9 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
           FetchActivationResponse(Some(ok), Some(msg))
         }
       case Left(QueueNotExist) => Source(List(FetchActivationResponse(Some(notFound))))
+      case _ => ???
     }
-    Await.result(fut, 5 seconds)
+    Source.fromFuture(fut) flatMapConcat identity
   }
 
   private def ok = ResponseStatus(200, "success")

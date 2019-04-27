@@ -1,112 +1,67 @@
 package org.apache.openwhisk.core.scheduler
 
-import scala.collection.immutable
-import akka.actor.{Actor, ActorRef, Props}
-import akka.stream.{ActorMaterializer, Materializer, OverflowStrategy, QueueOfferResult}
-import akka.stream.scaladsl.{Keep, Sink, Source, SourceQueueWithComplete}
+import akka.actor.{Actor, ActorRef, Props, Terminated}
+import akka.stream.scaladsl.Flow
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
-import org.apache.openwhisk.grpc.FetchActivationResponse
 
-import scala.concurrent.{Await, ExecutionContext}
+import scala.collection.immutable
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
-import scala.util.Success
 
 object Queue {
   def props(name: String) = Props(new Queue(name))
 
-  private case class WindowUpdate(fetcher: ActorRef, size: Int)
-
-  private case class FetcherState(window: Int, send: SourceQueueWithComplete[DummyActivation])
-  private case object FetchInit
-  private case class FetchTerminate(fetcher: ActorRef, reason: Either[String, Unit])
-  private case object Ack
+  final case object RegisterStage
+  final case object FetchRequest
+  final case class Fetched(activation: DummyActivation)
 }
 
 class Queue(name: String) extends Actor {
-  import QueueManager._
   import Queue._
+  import QueueManager._
 
   implicit val ex: ExecutionContext = context.dispatcher
   implicit val mat: Materializer = ActorMaterializer()
 
   private var queue = immutable.Queue.empty[DummyActivation]
-  private var fetchers = Map.empty[ActorRef, FetcherState]
+  private var fetchers = Map.empty[ActorRef, Int]
 
   override def receive: Receive = {
     case AppendActivation(act) =>
       queue = queue.enqueue(act)
       sender ! Right(Unit)
-      trySendActivations(None)
+      trySendActivation(None)
     case EstablishFetchStream(windows) =>
       implicit val timeout: Timeout = Timeout(5.seconds)
 
-      // create a source
-      val fetcher = sender()
-      // todo: warn when windowSize is absent (default to zero)
-      windows
-        .map(w => WindowUpdate(fetcher, w.getWindowsSize))
-        .to(
-          Sink
-            .actorRefWithAck(
-              self,
-              FetchInit,
-              Ack,
-              FetchTerminate(fetcher, Right(())),
-              ex => FetchTerminate(fetcher, Left(ex.toString))))
-        .run()
-      val (queue, actSource) = Source
-      // todo: investigate buffer size
-        .queue[DummyActivation](5, OverflowStrategy.backpressure)
-        .toMat(Sink.asPublisher(false))(Keep.both)
-        .mapMaterializedValue {
-          case (q, pub) => (q, Source.fromPublisher(pub))
-        }
-        .run()
-      fetchers += (fetcher -> FetcherState(0, queue))
-
-      // return source to sender to complete the ask operation
-      fetcher ! FetchStream(actSource)
-    case FetchInit =>
-    // no special handling
-    case FetchTerminate(fetcher, _) =>
-      // todo: add log
-      fetchers -= fetcher
-    case WindowUpdate(fetcher, newWindow) =>
-      val FetcherState(_, send) = fetchers(fetcher)
-      fetchers += (fetcher -> FetcherState(newWindow, send))
-      trySendActivations(Some(fetcher))
+      val flow = Flow.fromGraph(new ActivationStage(self))
+      val stream = windows.map(w => w.getWindowsSize).via(flow)
+      sender ! FetchStream(stream)
+    case RegisterStage =>
+      fetchers += (sender -> 0)
+      context.watch(sender)
+    case FetchRequest =>
+      val oldVal = fetchers(sender)
+      fetchers += (sender -> (oldVal + 1))
+      trySendActivation(Some(sender))
+    case Terminated(f) =>
+      fetchers -= f
   }
 
-  private def trySendActivations(hint: Option[ActorRef]): Unit = {
-    fetchers collectFirst {
-      case (f, FetcherState(window, _)) if window > 0 => f
-    } match {
-      case Some(fetcher) =>
-        val FetcherState(_, send) = fetchers(fetcher)
-        if (queue.nonEmpty) {
-          var (elem, newQueue) = queue.dequeue
-          val fut = send.offer(elem) map {
-            case QueueOfferResult.Enqueued =>
-            case _                         =>
-              // put back
-              newQueue = newQueue.enqueue(elem)
-          }
-          // this should be immediate
-          Await.result(fut, 1.second)
-          queue = newQueue
-        }
-      case None =>
+  private def trySendActivation(hint: Option[ActorRef]): Unit = {
+    hint orElse {
+      fetchers collectFirst {
+        case (f, window) if window > 0 => f
+      }
+    } foreach { fetcher =>
+      if (queue.nonEmpty) {
+        val (elem, newQueue) = queue.dequeue
+        val oldVal = fetchers(fetcher)
+        queue = newQueue
+        fetchers += (fetcher -> (oldVal - 1))
+        fetcher ! Fetched(elem)
+      }
     }
-//    for {
-//      fetcher <- fetchers collectFirst {
-//        case (f, FetcherState(window, _)) if window > 0 => f
-//      }
-//      elem <- queue.headOption
-//      send = fetchers(fetcher).send
-//      newQueue <- send.offer(elem) map {
-//        case QueueOfferResult.Enqueued => queue.tail
-//        case _ => queue
-//      }
-//    } yield newQueue
   }
 }
