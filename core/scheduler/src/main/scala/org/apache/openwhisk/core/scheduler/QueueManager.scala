@@ -5,10 +5,9 @@ import akka.actor.{Actor, ActorRef, Props}
 import akka.grpc.GrpcClientSettings
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
-import org.apache.openwhisk.grpc.WindowAdvertisement.Message
-import org.apache.openwhisk.grpc.{FetchActivationResponse, WindowAdvertisement}
+import org.apache.openwhisk.grpc.WindowAdvertisement
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 sealed abstract class QueueOperationError
 case object QueueNotExist extends QueueOperationError

@@ -5,8 +5,11 @@ import akka.grpc.GrpcClientSettings
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.TestKit
 import com.google.protobuf.ByteString
+import org.apache.openwhisk.core.database.etcd.QueueMetadataStoreConfig
 import org.apache.openwhisk.core.database.etcd.Utils.rangeEndOfPrefix
-import org.apache.openwhisk.grpc.etcd.{DeleteRangeRequest, KVClient}
+import org.apache.openwhisk.core.scheduler._
+import org.apache.openwhisk.grpc.QueueServiceClient
+import org.apache.openwhisk.grpc.etcd._
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
@@ -23,8 +26,12 @@ abstract class TestBase(sysName: String)
   implicit val ex: ExecutionContext = system.dispatcher
   implicit val mat: Materializer = ActorMaterializer()
 
-  protected val entityPrefix = "__unit_test_temp_objects/"
-  protected def etcdClientSettings: GrpcClientSettings
+  def etcdHost: String
+  def etcdPort: Int
+
+  val entityPrefix = "__unit_test_temp_objects/"
+
+  val etcdClientSettings: GrpcClientSettings = GrpcClientSettings.connectToServiceAt(etcdHost, etcdPort).withTls(false)
 
   override def afterAll(): Unit = {
     val prefix = entityPrefix.toByteString
@@ -36,10 +43,32 @@ abstract class TestBase(sysName: String)
     Await.result(system.whenTerminated, 10.seconds)
   }
 
-  protected def kvClient = KVClient(etcdClientSettings)
+  def kvClient = KVClient(etcdClientSettings)
 
-  implicit protected class StringExt(str: String) {
+  implicit class StringExt(str: String) {
     def toByteString: ByteString = ByteString.copyFromUtf8(str)
   }
+}
 
+trait LocalScheduler { this: TestBase =>
+  def schedulerPort: Int
+
+  val storeConfig = QueueMetadataStoreConfig(entityPrefix + "queue/%s/marker", entityPrefix + "queue/%s/endpoint")
+
+  private val local = "127.0.0.1"
+
+  def schedulerClient: QueueServiceClient = {
+    val config = GrpcClientSettings.connectToServiceAt(local, schedulerPort).withTls(false)
+    QueueServiceClient(config)
+  }
+
+  override def beforeAll(): Unit = {
+    implicit val etcdSettings: GrpcClientSettings = etcdClientSettings
+    implicit val schedulerConfig: SchedulerConfig = SchedulerConfig(local, storeConfig)
+
+    val manager = system.actorOf(QueueManager.props(etcdSettings, schedulerConfig))
+
+    val srv = new QueueServiceServer(new RpcEndpoint(manager)).run(local, schedulerPort)
+    Await.result(srv, 5.seconds)
+  }
 }
