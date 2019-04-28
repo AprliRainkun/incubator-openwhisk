@@ -23,6 +23,7 @@ abstract class TestBase(sysName: String)
     with AsyncWordSpecLike
     with Matchers
     with BeforeAndAfterAll {
+  implicit val sys: ActorSystem = system
   implicit val ex: ExecutionContext = system.dispatcher
   implicit val mat: Materializer = ActorMaterializer()
 

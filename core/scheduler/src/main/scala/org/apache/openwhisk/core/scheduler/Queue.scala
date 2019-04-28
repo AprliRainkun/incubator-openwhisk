@@ -31,37 +31,40 @@ class Queue(name: String) extends Actor {
     case AppendActivation(act) =>
       queue = queue.enqueue(act)
       sender ! Right(Unit)
-      trySendActivation(None)
+      trySend(None)
     case EstablishFetchStream(windows) =>
       implicit val timeout: Timeout = Timeout(5.seconds)
 
       val flow = Flow.fromGraph(new ActivationStage(self))
       val stream = windows.map(w => w.getWindowsSize).via(flow)
-      sender ! FetchStream(stream)
+      sender ! Right(FetchStream(stream))
     case RegisterStage =>
       fetchers += (sender -> 0)
       context.watch(sender)
     case FetchRequest =>
       val oldVal = fetchers(sender)
       fetchers += (sender -> (oldVal + 1))
-      trySendActivation(Some(sender))
+      trySend(Some(sender))
     case Terminated(f) =>
       fetchers -= f
   }
 
-  private def trySendActivation(hint: Option[ActorRef]): Unit = {
-    hint orElse {
+  private def trySend(hint: Option[ActorRef]): Unit = {
+    hint map { f =>
+      (f, fetchers(f))
+    } orElse {
       fetchers collectFirst {
-        case (f, window) if window > 0 => f
+        case (fetcher, window) if window > 0 => (fetcher, window)
       }
-    } foreach { fetcher =>
-      if (queue.nonEmpty) {
-        val (elem, newQueue) = queue.dequeue
-        val oldVal = fetchers(fetcher)
-        queue = newQueue
-        fetchers += (fetcher -> (oldVal - 1))
-        fetcher ! Fetched(elem)
-      }
+    } foreach {
+      case (fetcher, window) =>
+        val send = Math.min(window, queue.size)
+        (1 to send) foreach { _ =>
+          val (elem, newQueue) = queue.dequeue
+          fetcher ! Fetched(elem)
+          queue = newQueue
+        }
+        fetchers += (fetcher -> (window - send))
     }
   }
 }

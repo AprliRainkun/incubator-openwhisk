@@ -57,7 +57,7 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
           val name = first.head.getActionName
           // todo: race?
           queues.get(name) match {
-            case Some(queue) => queue forward EstablishFetchStream(remaining)
+            case Some(queue) => queue.tell(EstablishFetchStream(remaining), currentSender)
             case None        => currentSender ! Left(QueueNotExist)
           }
       }

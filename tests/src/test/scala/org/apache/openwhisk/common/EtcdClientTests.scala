@@ -127,15 +127,6 @@ class EtcdClientTests
     }
   }
 
-  override def afterAll(): Unit = {
-    val prefix = entityPrefix.toByteString
-    val req = DeleteRangeRequest(key = prefix, rangeEnd = rangeEndOfPrefix(prefix))
-    val fut = kvClient.deleteRange(req) map { _ =>
-      system.terminate()
-    }
-    Await.result(fut, 5.seconds)
-  }
-
   private def feedAndSource[T] = {
     val (source, sink) = Source
       .asSubscriber[T]
@@ -149,6 +140,15 @@ class EtcdClientTests
       .toMat(sink)(Keep.left)
       .run()
     (feed, source)
+  }
+
+  override def afterAll(): Unit = {
+    val prefix = entityPrefix.toByteString
+    val req = DeleteRangeRequest(key = prefix, rangeEnd = rangeEndOfPrefix(prefix))
+    val fut = kvClient.deleteRange(req) map { _ =>
+      system.terminate()
+    }
+    Await.result(fut, 5.seconds)
   }
 
   private def kvClient = KVClient(clientConfig)
