@@ -118,6 +118,36 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
 
       succeed
     }
+
+    "not send more activations than requested" in {
+      val actionName = "ns/pkg/act444"
+      val putNum = 10
+
+      val putFut = for {
+        resp <- createQueue(actionName)
+        _ = resp.status.value.statusCode should be(200)
+        _ <- seedNPuts(actionName, putNum)
+      } yield ()
+      Await.result(putFut, 3.seconds)
+
+      val (sender, source) = Utils.feedAndSource[WindowAdvertisement]
+      val recv = schedulerClient.fetch(source).runWith(TestSink.probe)
+
+      sender.sendNext(WindowAdvertisement(Message.ActionName(actionName)))
+      recv.request(10)
+
+      (1 to 4) foreach {n =>
+        sender.sendNext(WindowAdvertisement(Message.WindowsSize(n)))
+        recv.expectNextN(n)
+        // the window should be depleted, no activation should be received
+        recv.expectNoMessage(3.seconds)
+      }
+
+      sender.sendComplete()
+      recv.expectComplete()
+
+      succeed
+    }
   }
 
   private def createQueue(actionName: String): Future[CreateQueueResponse] = {
