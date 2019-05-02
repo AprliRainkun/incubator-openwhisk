@@ -1,6 +1,6 @@
 package org.apache.openwhisk.core.scheduler
 
-import akka.actor.{Actor, ActorRef, Props, Timers}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props, Timers}
 import akka.stream.{ActorMaterializer, Materializer}
 
 import scala.collection.immutable
@@ -13,16 +13,17 @@ object Queue {
 
   final case class Handle(queue: ActorRef, key: Long)
   final case class CancelFetch(key: Long)
+  // n most be nonzero
   final case class RequestAtMost(key: Long, n: Int)
   final case class Response(as: List[DummyActivation])
 
   // fetcher will be set to Some(f) when the first RequestAtMost message is received
-  private case class Registration(n: Int, fetcher: Option[ActorRef])
+  private case class Registration(n: Int, fetcher: ActorRef)
   private case object TKey
   private case object TTick
 }
 
-class Queue(name: String) extends Actor with Timers {
+class Queue(name: String) extends Actor with Timers with ActorLogging {
   import Queue._
   import QueueManager._
 
@@ -31,7 +32,7 @@ class Queue(name: String) extends Actor with Timers {
 
   private var counter = 0L
   private var queue = immutable.Queue.empty[DummyActivation]
-  private var fetchers = Map.empty[Long, Registration]
+  private var waitingList = Map.empty[Long, Registration]
 
   timers.startPeriodicTimer(TKey, TTick, 5.seconds)
 
@@ -39,29 +40,35 @@ class Queue(name: String) extends Actor with Timers {
     case AppendActivation(act) =>
       queue = queue.enqueue(act)
       sender ! Right(Unit)
-      trySend(None)
+      log.debug(s"append activation to queue, new len ${queue.size}")
+      servePendingFetch()
     case EstablishFetchStream(windows) =>
       val key = nextKey
-      fetchers += (key -> Registration(0, None))
 
       val flow = ReactiveActivationFlow.create(Handle(self, key))
       val stream = windows.map(w => w.getWindowsSize).via(flow)
       sender ! Right(FetchStream(stream))
     case RequestAtMost(key, n) =>
-      val old = fetchers(key).n
-      fetchers += (key -> Registration(old + n, Some(sender)))
-      trySend(Some(key))
-    case CancelFetch(key) =>
-      val Registration(n, Some(f)) = fetchers(key)
-      // send en empty response to allow the ask future to complete
-      if (n > 0) {
-        f ! Response(List.empty)
+      log.debug(s"fetcher $key request $n")
+      if (queue.nonEmpty) {
+        dispatchAtMostNToFetcher(n, sender, key)
+      } else {
+        waitingList += (key -> Registration(n, sender))
       }
-      fetchers -= key
+    case CancelFetch(key) =>
+      log.debug(s"received cancel from fetcher $key")
+      if (waitingList.contains(key)) {
+        val Registration(n, f) = waitingList(key)
+        // send en empty response to allow the ask future to complete
+        log.debug(
+          s"fetcher $key has requested $n elems previously, now send empty to allow the pending ask to complete")
+        f ! Response(List.empty)
+        waitingList -= key
+      }
     case TTick =>
       // prevent ask future from timing out
-      fetchers collect {
-        case (_, Registration(n, Some(f))) if n > 0 => f
+      waitingList collect {
+        case (_, Registration(_, f)) => f
       } foreach { f =>
         f ! Response(List.empty)
       }
@@ -72,27 +79,25 @@ class Queue(name: String) extends Actor with Timers {
     counter
   }
 
-  private def trySend(hint: Option[Long]): Unit = {
-    hint map { key =>
-      (key, fetchers(key).n)
-    } orElse {
-      fetchers collectFirst {
-        case (key, Registration(n, _)) if n > 0 => (key, n)
-      }
+  private def dispatchAtMostNToFetcher(n: Int, fetcher: ActorRef, key: Long): Unit = {
+    val send = Math.min(n, queue.size)
+    val es = ListBuffer.empty[DummyActivation]
+    (1 to send) foreach { _ =>
+      val (elem, newQueue) = queue.dequeue
+      es.append(elem)
+      queue = newQueue
+    }
+    log.debug(s"dispatch ${es.size} acts to fetcher $key")
+    fetcher ! Response(es.toList)
+  }
+
+  private def servePendingFetch(): Unit = {
+    waitingList collectFirst {
+      case (key, Registration(n, fetcher)) => (key, n, fetcher)
     } foreach {
-      case (key, n) =>
-        val send = Math.min(n, queue.size)
-        if (send > 0) {
-          val es = ListBuffer.empty[DummyActivation]
-          (1 to send) foreach { _ =>
-            val (elem, newQueue) = queue.dequeue
-            es.append(elem)
-            queue = newQueue
-          }
-          val fO = fetchers(key).fetcher
-          fetchers += (key -> Registration(n - send, fO))
-          fO.head ! Response(es.toList)
-        }
+      case (key, n, fetcher) =>
+        dispatchAtMostNToFetcher(n, fetcher, key)
+        waitingList -= key
     }
   }
 }

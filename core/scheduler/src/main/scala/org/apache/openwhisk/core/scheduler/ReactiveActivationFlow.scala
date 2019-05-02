@@ -60,16 +60,16 @@ class RepeatUntilAccumulateToStage(handle: Queue.Handle) extends GraphStage[FanI
       new InHandler {
         override def onPush(): Unit = {
           remaining = grab(inTarget)
+          // println(s"key: ${handle.key} inTarget:onPush(), remaining = $remaining")
           if (isAvailable(out)) {
             sendRemaining()
           }
         }
 
         override def onUpstreamFinish(): Unit = {
+          // println(s"key: ${handle.key} inTarget:OnUpstreamFinish(), pendingFeedback = $pendingFeedback")
           handle.queue ! Queue.CancelFetch(handle.key)
-          if (!pendingFeedback) {
-            completeStage()
-          }
+          completeStage()
         }
       })
 
@@ -78,18 +78,14 @@ class RepeatUntilAccumulateToStage(handle: Queue.Handle) extends GraphStage[FanI
       new InHandler {
         override def onPush(): Unit = {
           remaining -= grab(inFeedback)
+          // println(s"key: ${handle.key} inFeedback:onPush(), remaining = $remaining")
           pendingFeedback = false
-
-          if (isClosed(inTarget)) {
-            completeStage()
-            return
-          }
 
           pull(inFeedback)
           if (remaining == 0) {
             pull(inTarget)
           }
-          if (isAvailable(out)) {
+          if (remaining > 0 && isAvailable(out)) {
             sendRemaining()
           }
         }
@@ -106,6 +102,7 @@ class RepeatUntilAccumulateToStage(handle: Queue.Handle) extends GraphStage[FanI
     private def sendRemaining(): Unit = {
       push(out, remaining)
       pendingFeedback = true
+      // println(s"key: ${handle.key} push remaining = $remaining to out")
     }
   }
 }
