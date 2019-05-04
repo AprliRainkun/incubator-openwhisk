@@ -13,7 +13,7 @@ object ReactiveActivationFlow {
   def create(handle: Queue.Handle): Flow[Int, DummyActivation, NotUsed] = {
     implicit val to: Timeout = Timeout.create(Duration.ofSeconds(10))
 
-    val fetchFlow: Flow[Int, List[DummyActivation], NotUsed] = Flow[Int].mapAsync(1) { n =>
+    val fetchFlow = Flow[Int].mapAsync(1) { n =>
       (handle.queue ? Queue.RequestAtMost(handle.key, n)).mapTo[Queue.Response]
     } map (_.as)
 
