@@ -3,7 +3,7 @@ package org.apache.openwhisk.core.scheduler
 import akka.NotUsed
 import akka.actor.{Actor, ActorRef, Props}
 import akka.grpc.GrpcClientSettings
-import akka.stream.scaladsl.{Keep, Sink, Source}
+import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
 import org.apache.openwhisk.grpc.WindowAdvertisement
 
@@ -51,7 +51,7 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
     case EstablishFetchStream(windows) =>
       val currentSender = sender()
 
-      windows.prefixAndTail(1).toMat(Sink.head)(Keep.right).run() map {
+      windows.prefixAndTail(1).runWith(Sink.head) map {
         case (first, remaining) =>
           // todo: warn when actionName is absent (default to "")
           val name = first.head.getActionName
