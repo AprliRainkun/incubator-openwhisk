@@ -1,20 +1,19 @@
 package org.apache.openwhisk.core.scheduler.test
 
-import com.google.protobuf.ByteString
-import org.junit.runner.RunWith
-import org.scalatest.junit.JUnitRunner
-import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
-import org.scalatest.OptionValues._
 import akka.actor.ActorSystem
 import akka.grpc.GrpcClientSettings
-import akka.stream.{ActorMaterializer, Materializer}
 import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{TestKit, TestProbe}
-import org.apache.openwhisk.grpc._
 import org.apache.openwhisk.core.scheduler._
+import org.apache.openwhisk.grpc._
+import org.junit.runner.RunWith
+import org.scalatest.OptionValues._
+import org.scalatest.junit.JUnitRunner
+import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
 
-import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext}
 
 @RunWith(classOf[JUnitRunner])
 class GrpcSetupTests
@@ -57,8 +56,7 @@ class GrpcSetupTests
     }
 
     "expose its put method" in {
-      val tid = TransactionId("#tid_000")
-      val act = Activation(Option(tid), "ns/pkg/act", ByteString.EMPTY)
+      val act = Activation("ns/pkg/act")
 
       val resp = Await.result(client.put(act), 3.seconds)
 

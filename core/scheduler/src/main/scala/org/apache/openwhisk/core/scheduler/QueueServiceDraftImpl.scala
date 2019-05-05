@@ -3,7 +3,6 @@ package org.apache.openwhisk.core.scheduler
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import com.google.protobuf.ByteString
 import org.apache.openwhisk.grpc._
 
 import scala.concurrent.Future
@@ -12,8 +11,7 @@ class QueueServiceDraftImpl(implicit mat: Materializer) extends QueueService {
 
   override def fetch(windows: Source[WindowAdvertisement, NotUsed]): Source[FetchActivationResponse, NotUsed] = {
     windows.map(w => {
-      val tid = TransactionId("#tid_000")
-      val activation = Activation(Some(tid), "empty", ByteString.EMPTY)
+      val activation = Activation("empty")
       FetchActivationResponse(Some(ok), Some(activation))
     })
   }

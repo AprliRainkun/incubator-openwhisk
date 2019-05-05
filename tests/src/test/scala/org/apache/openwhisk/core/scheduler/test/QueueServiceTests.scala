@@ -221,9 +221,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   }
 
   private def seedNPuts(actionName: String, num: Int): Future[Unit] = {
-    val tid = TransactionId("#tid_000")
-
     val seed = (1 to num).toList
-    Future.traverse(seed)(_ => schedulerClient.put(Activation(Some(tid), actionName, ByteString.EMPTY))) map (_ => ())
+    Future.traverse(seed)(_ => schedulerClient.put(Activation(actionName))) map (_ => ())
   }
 }

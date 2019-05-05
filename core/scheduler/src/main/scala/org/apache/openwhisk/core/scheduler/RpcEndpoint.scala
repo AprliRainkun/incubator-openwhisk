@@ -7,7 +7,6 @@ import akka.pattern.ask
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
-import com.google.protobuf.ByteString
 import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.scheduler.QueueManager._
 import org.apache.openwhisk.grpc._
@@ -52,11 +51,11 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
     val fut = (queueManager ? EstablishFetchStream(windows)).mapTo[EstablishResult] map {
       case Right(FetchStream(acts)) =>
         acts.map { dummy =>
-          val msg = Activation(Some(TransactionId("#tid_from_dummy_activation")), dummy.action, ByteString.EMPTY)
+          val msg = Activation(dummy.action)
           FetchActivationResponse(Some(ok), Some(msg))
         }
       case Left(QueueNotExist) => Source(List(FetchActivationResponse(Some(notFound))))
-      case _ => ???
+      case _                   => ???
     }
     Source.fromFuture(fut) flatMapConcat identity
   }

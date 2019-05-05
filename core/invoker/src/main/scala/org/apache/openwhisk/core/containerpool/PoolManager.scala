@@ -1,7 +1,7 @@
 package org.apache.openwhisk.core.containerpool
 
 import akka.NotUsed
-import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.grpc.GrpcClientSettings
 import akka.stream._
 import akka.stream.scaladsl.{Flow, Source}
@@ -23,7 +23,10 @@ object PoolManager {
     implicit instance: InvokerInstanceId,
     logging: Logging) = Props(new PoolManager(entityStore, activationStore, producer))
 
-  private case class StreamReady(action: String, activations: Source[String, NotUsed], requester: ActorRef)
+  private case class StreamReady(action: String,
+                                 activations: Source[String, NotUsed],
+                                 initCommand: DummyAllocateContainer,
+                                 requester: ActorRef)
 }
 
 class PoolManager(entityStore: ArtifactStore[WhiskEntity], activationStore: ActivationStore, producer: MessageProducer)(
@@ -41,20 +44,20 @@ class PoolManager(entityStore: ArtifactStore[WhiskEntity], activationStore: Acti
   private var pools = Map.empty[String, ActorRef]
 
   override def receive: Receive = {
-    case msg @ DummyAllocateContainer(action) =>
+    case command @ DummyAllocateContainer(action) =>
       if (!pools.contains(action)) {
         val activationsFut = establishActivationStream(queueServiceClient, action)
         val currentSender = sender()
         activationsFut map { acts =>
-          self ! StreamReady(action, acts, currentSender)
+          self ! StreamReady(action, acts, command, currentSender)
         }
       } else {
-        pools(action) forward msg
+        pools(action) forward command
       }
-    case StreamReady(action, activations, requester) =>
+    case StreamReady(action, activations, initCommand, requester) =>
       val poolActor = sys.actorOf(ContainerPoolForAction.props(activations, entityStore, activationStore, producer))
+      poolActor.tell(initCommand, requester)
       pools += (action -> poolActor)
-      requester ! Status.Success
   }
 
   private def establishActivationStream(queueClient: QueueServiceClient, action: String)(
@@ -70,7 +73,7 @@ class PoolManager(entityStore: ArtifactStore[WhiskEntity], activationStore: Acti
 
     val activations = queueClient
       .fetch(windows)
-      .map(_ => ???)
+      .map(w => w.activation.head.body)
 
     sendFuture map { send =>
       val sideChannel = Flow

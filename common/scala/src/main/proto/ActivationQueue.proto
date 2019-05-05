@@ -17,9 +17,8 @@ service QueueService {
 }
 
 message Activation {
-    TransactionId tid = 1;
     string actionName = 2;
-    bytes payload = 3;
+    string body = 3;
 }
 
 message TransactionId {
