@@ -13,6 +13,8 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
 
+import scala.language.postfixOps
+
 @RunWith(classOf[JUnitRunner])
 class ConflatedTickerTests
     extends TestKit(ActorSystem("ConflatedTickerTests"))
@@ -25,26 +27,50 @@ class ConflatedTickerTests
   override def afterAll(): Unit = system.terminate()
 
   "Conflated ticker" should {
+    "produce nonzero aggregated tick numbers" in {
+      val totalTicks = 1000
+
+      val (senderFut, acc) = Source
+        .fromGraph(new ConflatedTickerStage)
+        .throttle(5, 1 second)
+        .map {c =>
+          c should not be 0
+          c
+        }
+        .toMat(Sink.ignore)(Keep.both)
+        .run()
+
+      val done = for {
+        sender <- senderFut
+        _ <- Source(1 to totalTicks)
+          .throttle(200, 1 second)
+          .runForeach(_ => sender.send(1))
+      } yield sender.complete()
+
+      Await.result(done, 8 seconds)
+      Await.result(acc, 1 second)
+    }
+
     "produce correct aggregated tick number with a slow sender" in {
       val totalRounds = 500
 
       val (senderFut, acc) = Source
         .fromGraph(new ConflatedTickerStage)
-        .throttle(1, 200.millis)
+        .throttle(1, 200 millis)
         .toMat(Sink.fold(0)(_ + _))(Keep.both)
         .run()
 
       val done = for {
         sender <- senderFut
         _ <- Source(1 to totalRounds)
-          .throttle(1, 20.millis)
+          .throttle(1, 20 millis)
           .runForeach { x =>
             sender.send(x)
           }
       } yield sender.complete()
-      Await.result(done, 20.seconds)
+      Await.result(done, 20 seconds)
 
-      val observed = Await.result(acc, 1.second)
+      val observed = Await.result(acc, 1 second)
       observed should be((1 to totalRounds).sum)
     }
 
@@ -53,21 +79,21 @@ class ConflatedTickerTests
 
       val (senderFut, acc) = Source
         .fromGraph(new ConflatedTickerStage)
-        .throttle(5, 1.second)
+        .throttle(5, 1 second)
         .toMat(Sink.fold(0)(_ + _))(Keep.both)
         .run()
 
       val done = for {
         sender <- senderFut
         _ <- Source(1 to totalTicks)
-          .throttle(50000, 1.second)
+          .throttle(50000, 1 second)
           .runForeach { _ =>
             sender.send(1)
           }
       } yield sender.complete()
-      Await.result(done, 5.seconds)
+      Await.result(done, 5 seconds)
 
-      val observed = Await.result(acc, 1.second)
+      val observed = Await.result(acc, 1 second)
       observed should be(totalTicks)
     }
 
@@ -78,13 +104,13 @@ class ConflatedTickerTests
         .run()
 
       // first, send 10 ticks
-      val sender = Await.result(senderFut, 1.second)
+      val sender = Await.result(senderFut, 1 second)
       (1 to 10) foreach { _ =>
         sender.send(1)
       }
 
       accRecv.request(1)
-      val a1 = accRecv.expectNext(20.millis)
+      val a1 = accRecv.expectNext(20 millis)
       a1 should be(10)
 
       // then, send another 10 ticks and complete
@@ -96,7 +122,7 @@ class ConflatedTickerTests
       // receiver should still be able to get the number
       // after the sender completes
       accRecv.request(1)
-      val a2 = accRecv.expectNext(20.millis)
+      val a2 = accRecv.expectNext(20 millis)
       a2 should be(10)
 
       accRecv.expectComplete()

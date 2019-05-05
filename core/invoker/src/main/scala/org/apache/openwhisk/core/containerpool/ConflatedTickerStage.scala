@@ -22,7 +22,7 @@ class ConflatedTickerStage extends GraphStageWithMaterializedValue[SourceShape[I
       override def preStart(): Unit = {
         val sendCallback = getAsyncCallback[Int] { x =>
           counter += x
-          if (isAvailable(out)) {
+          if (isAvailable(out) && counter > 0) {
             pushAndReset()
           }
         }
