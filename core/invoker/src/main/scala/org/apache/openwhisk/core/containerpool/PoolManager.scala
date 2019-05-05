@@ -4,13 +4,21 @@ import akka.NotUsed
 import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
 import akka.grpc.GrpcClientSettings
 import akka.stream._
-import akka.stream.scaladsl.Source
+import akka.stream.scaladsl.{Flow, Source}
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
+
+object PoolManager {
+  final case class DummyAllocateContainer(action: String)
+
+  def props() = Props(new PoolManager)
+
+  private case class StreamReady(action: String, activations: Source[Array[Byte], NotUsed], requester: ActorRef)
+}
 
 class PoolManager() extends Actor {
   import PoolManager._
@@ -24,35 +32,44 @@ class PoolManager() extends Actor {
   private var pools = Map.empty[String, ActorRef]
 
   override def receive: Receive = {
-    case DummyAllocateContainer(action) =>
+    case msg @ DummyAllocateContainer(action) =>
       if (!pools.contains(action)) {
-        val (senderFut, activations) = establishActivationFlow(queueServiceClient, action)
-        val poolActor = sys.actorOf(ContainerPoolForAction.props(senderFut, activations))
-        pools += (action -> poolActor)
+        val activationsFut = establishActivationStream(queueServiceClient, action)
+        val currentSender = sender()
+        activationsFut map { acts =>
+          self ! StreamReady(action, acts, currentSender)
+        }
+      } else {
+        pools(action) forward msg
       }
-      sender ! Status.Success
+    case StreamReady(action, activations, requester) =>
+      val poolActor = sys.actorOf(ContainerPoolForAction.props(activations))
+      pools += (action -> poolActor)
+      requester ! Status.Success
   }
 
-  private def establishActivationFlow(queueClient: QueueServiceClient, action: String)(
-  implicit mat: Materializer): (Future[TickerSendEnd], Source[Array[Byte], NotUsed]) = {
-    val (send, batchSizes) = Source
+  private def establishActivationStream(queueClient: QueueServiceClient, action: String)(
+    implicit mat: Materializer): Future[Source[Array[Byte], NotUsed]] = {
+    val (sendFuture, batchSizes) = Source
       .fromGraph(new ConflatedTickerStage)
-      .throttle(1, 20.millis)
+      .throttle(1, 20 millis)
       .map(b => WindowAdvertisement(Message.WindowsSize(b)))
       .preMaterialize()
 
     val windows = Source(List(WindowAdvertisement(Message.ActionName(action))))
       .concat(batchSizes)
+
     val activations = queueClient
       .fetch(windows)
       .map(_ => ???)
 
-    (send, activations)
+    sendFuture map { send =>
+      val sideChannel = Flow
+        .fromGraph(new SideChannelBackpressureStage[Array[Byte]](send))
+        .async
+        // TODO: make the buffer size configurable
+        .addAttributes(Attributes.inputBuffer(5, 5))
+      activations.via(sideChannel)
+    }
   }
-}
-
-object PoolManager {
-  final case class DummyAllocateContainer(action: String)
-
-  def props() = Props(new PoolManager)
 }
