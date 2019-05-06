@@ -64,7 +64,7 @@ class PoolManager(entityStore: ArtifactStore[WhiskEntity], activationStore: Acti
     implicit mat: Materializer): Future[Source[String, NotUsed]] = {
     val (sendFuture, batchSizes) = Source
       .fromGraph(new ConflatedTickerStage)
-      .throttle(1, 20 millis)
+      //.throttle(1, 20 millis)
       .map(b => WindowAdvertisement(Message.WindowsSize(b)))
       .preMaterialize()
 

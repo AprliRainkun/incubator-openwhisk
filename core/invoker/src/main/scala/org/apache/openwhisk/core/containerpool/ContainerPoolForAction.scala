@@ -48,12 +48,12 @@ class ContainerPoolForAction(runMessages: Source[String, NotUsed],
 
   runMessages
   // parallel fetch
-    .mapAsyncUnordered(5)(convertToRunnable)
-    .collect {
-      case Some(run) => run
+    .mapAsyncUnordered(5) { msg =>
+      convertToRunnable(msg).flatMap{
+        case Some(run) => self ? run
+        case None => Future.successful()
+      }
     }
-    // the ask operation should be able to complete quickly
-    .mapAsyncUnordered(5)(self ? _)
     .runWith(Sink.ignore)
 
   override def receive: Receive = {
