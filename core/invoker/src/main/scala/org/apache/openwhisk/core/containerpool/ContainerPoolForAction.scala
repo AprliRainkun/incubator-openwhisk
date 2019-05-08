@@ -2,11 +2,8 @@ package org.apache.openwhisk.core.containerpool
 
 import java.time.Instant
 
-import akka.NotUsed
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.event.Logging._
-import akka.pattern.ask
-import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import org.apache.kafka.common.errors.RecordTooLargeException
@@ -25,16 +22,27 @@ import scala.language.postfixOps
 import scala.util.{Failure, Success}
 
 object ContainerPoolForAction {
-  def props(runMessages: Source[String, NotUsed],
+  def props(messageBroker: ActorRef,
+            action: String,
             entityStore: ArtifactStore[WhiskEntity],
             activationStore: ActivationStore,
             producer: MessageProducer)(implicit instance: InvokerInstanceId, logging: Logging) =
-    Props(new ContainerPoolForAction(runMessages, entityStore, activationStore, producer))
+    Props(new ContainerPoolForAction(messageBroker, action, entityStore, activationStore, producer))
 
-  final case object NeedMessage
+  // private data
+  private case class ContainerState(proxy: ActorRef, activeActivationCount: Int, pool: Pool)
+
+  private sealed abstract class Pool {
+    case object Free extends Pool
+    case object Busy extends Pool
+    case object Initing extends Pool
+    case object Retiring extends Pool
+  }
+
 }
 
-class ContainerPoolForAction(runMessages: Source[String, NotUsed],
+class ContainerPoolForAction(messageBroker: ActorRef,
+                             action: String,
                              entityStore: ArtifactStore[WhiskEntity],
                              activationStore: ActivationStore,
                              producer: MessageProducer)(implicit instance: InvokerInstanceId, logging: Logging)
@@ -43,18 +51,12 @@ class ContainerPoolForAction(runMessages: Source[String, NotUsed],
   implicit val sys: ActorSystem = context.system
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ex: ExecutionContext = sys.dispatcher
-
   implicit val timeout: Timeout = Timeout(1 second)
 
-  runMessages
-  // parallel fetch
-    .mapAsyncUnordered(5) { msg =>
-      convertToRunnable(msg).flatMap{
-        case Some(run) => self ? run
-        case None => Future.successful()
-      }
-    }
-    .runWith(Sink.ignore)
+  private var freePool = Map.empty[ActorRef, ContainerState]
+  private var busyPool = Map.empty[ActorRef, ContainerState]
+  private var initingPool = Map.empty[ActorRef, ContainerState]
+  private var retiringPool = Map.empty[ActorRef, ContainerState]
 
   override def receive: Receive = {
     case r: Run =>
@@ -62,7 +64,10 @@ class ContainerPoolForAction(runMessages: Source[String, NotUsed],
     // construct a runnable action by fetching code from database
     // ack immediately on failure
     // dispatch runnable action to container proxy
-
+    case alloc: PoolManager.AllocateContainer      =>
+    case ContainerProxySlim.Initialized            =>
+    case ContainerProxySlim.Done(tid, msg, result) =>
+    case ContainerProxySlim.Removed                =>
   }
 
   private def convertToRunnable(msg: String): Future[Option[Run]] = {

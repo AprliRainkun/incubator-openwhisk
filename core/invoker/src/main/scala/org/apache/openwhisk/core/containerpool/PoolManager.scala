@@ -17,7 +17,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
 
 object PoolManager {
-  final case class DummyAllocateContainer(action: String)
+  final case class AllocateContainer(action: String)
 
   def props(entityStore: ArtifactStore[WhiskEntity], activationStore: ActivationStore, producer: MessageProducer)(
     implicit instance: InvokerInstanceId,
@@ -25,7 +25,7 @@ object PoolManager {
 
   private case class StreamReady(action: String,
                                  activations: Source[String, NotUsed],
-                                 initCommand: DummyAllocateContainer,
+                                 initCommand: AllocateContainer,
                                  requester: ActorRef)
 }
 
@@ -44,27 +44,21 @@ class PoolManager(entityStore: ArtifactStore[WhiskEntity], activationStore: Acti
   private var pools = Map.empty[String, ActorRef]
 
   override def receive: Receive = {
-    case command @ DummyAllocateContainer(action) =>
+    case command @ AllocateContainer(action) =>
       if (!pools.contains(action)) {
-        val activationsFut = establishActivationStream(queueServiceClient, action)
-        val currentSender = sender()
-        activationsFut map { acts =>
-          self ! StreamReady(action, acts, command, currentSender)
-        }
-      } else {
-        pools(action) forward command
+        val messageBroker = sys.actorOf(MessageBroker.props(queueServiceClient, action, 5))
+        val pool =
+          sys.actorOf(ContainerPoolForAction.props(messageBroker, action, entityStore, activationStore, producer))
+        pools += (action -> pool)
       }
-    case StreamReady(action, activations, initCommand, requester) =>
-      val poolActor = sys.actorOf(ContainerPoolForAction.props(activations, entityStore, activationStore, producer))
-      poolActor.tell(initCommand, requester)
-      pools += (action -> poolActor)
+      pools(action) forward command
   }
 
   private def establishActivationStream(queueClient: QueueServiceClient, action: String)(
     implicit mat: Materializer): Future[Source[String, NotUsed]] = {
     val (sendFuture, batchSizes) = Source
       .fromGraph(new ConflatedTickerStage)
-      //.throttle(1, 20 millis)
+      .throttle(1, 20 millis)
       .map(b => WindowAdvertisement(Message.WindowsSize(b)))
       .preMaterialize()
 

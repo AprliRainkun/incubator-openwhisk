@@ -2,7 +2,7 @@ package org.apache.openwhisk.core.containerpool
 
 import java.time.Instant
 
-import akka.actor.{Actor, ActorRef, FSM, Props}
+import akka.actor.{Actor, ActorRef}
 import akka.pattern.pipe
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.connector.ActivationMessage
@@ -10,23 +10,18 @@ import org.apache.openwhisk.core.entity.ExecManifest.ImageName
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.entity.size._
 import org.apache.openwhisk.http.Messages
-import spray.json._
 import spray.json.DefaultJsonProtocol._
+import spray.json._
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 object ContainerProxySlim {
 
   // messages
   final case object Initialized
   final case class Start(tid: TransactionId, msg: ActivationMessage)
-  final case class Done(tid: TransactionId,
-                        activationResult: WhiskActivation,
-                        blockingInvoke: Boolean,
-                        controllerInstance: ControllerInstanceId,
-                        userId: UUID,
-                        isSlowFree: Boolean)
+  final case class Done(tid: TransactionId, msg: ActivationMessage, activationResult: WhiskActivation)
   final case object Removed
 
   // private messages
@@ -34,6 +29,7 @@ object ContainerProxySlim {
 }
 
 class ContainerProxySlim(pool: ActorRef,
+                         poolConfig: ContainerPoolConfig,
                          factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
                          triggerTid: TransactionId,
                          initTimeout: FiniteDuration,
@@ -47,7 +43,8 @@ class ContainerProxySlim(pool: ActorRef,
     ContainerProxy.containerName(instance, action.namespace.asString, action.name.asString),
     action.exec.image,
     action.exec.pull,
-    action.limits.memory.megabytes.MB)
+    action.limits.memory.megabytes.MB,
+    poolConfig.cpuShare(action.limits.memory.megabytes.MB))
     .flatMap { container =>
       implicit val tid: TransactionId = triggerTid
       initContainer(container, action, initTimeout) map (_ => ContainerInitialized(container))
@@ -62,7 +59,9 @@ class ContainerProxySlim(pool: ActorRef,
   private def initialized(container: Container): Receive = {
     case Start(tid, msg) =>
       implicit val transId: TransactionId = tid
-      run(container, action, msg)
+      run(container, action, msg) map { result =>
+        Done(tid, msg, result)
+      } pipeTo pool
   }
 
   private def initContainer(container: Container, action: ExecutableWhiskAction, timeout: FiniteDuration)(
