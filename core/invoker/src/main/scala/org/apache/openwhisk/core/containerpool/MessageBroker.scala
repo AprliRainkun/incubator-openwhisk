@@ -123,7 +123,8 @@ class MessageBroker(queueClient: QueueServiceClient, action: String, bufferLimit
     req + arriving
   }
 
-  private def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
+  // override by unit tests
+  protected def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
     val (sendFuture, batchSizes) = Source
       .fromGraph(new ConflatedTickerStage)
       .throttle(1, 20 millis)
