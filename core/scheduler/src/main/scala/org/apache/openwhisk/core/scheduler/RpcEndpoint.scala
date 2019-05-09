@@ -37,8 +37,7 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
   override def put(in: Activation): Future[PutActivationResponse] = {
     implicit val timeout: Timeout = Timeout(5 seconds)
 
-    val act = DummyActivation(in.actionName)
-    (queueManager ? AppendActivation(act)).mapTo[AppendResult] map {
+    (queueManager ? AppendActivation(in)).mapTo[AppendResult] map {
       case Right(_)            => ok
       case Left(QueueNotExist) => notFound
       case Left(Overloaded)    => ResponseStatus(429, "queue too long, try later")
@@ -50,9 +49,8 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
 
     val fut = (queueManager ? EstablishFetchStream(windows)).mapTo[EstablishResult] map {
       case Right(FetchStream(acts)) =>
-        acts.map { dummy =>
-          val msg = Activation(dummy.action)
-          FetchActivationResponse(Some(ok), Some(msg))
+        acts.map { act =>
+          FetchActivationResponse(Some(ok), Some(act))
         }
       case Left(QueueNotExist) => Source(List(FetchActivationResponse(Some(notFound))))
       case _                   => ???

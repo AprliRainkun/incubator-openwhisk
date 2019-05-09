@@ -1,7 +1,7 @@
 package org.apache.openwhisk.core.containerpool
 
 import akka.NotUsed
-import akka.actor.{ActorRef, FSM, Props}
+import akka.actor.{ActorRef, FSM, Props, Stash}
 import akka.pattern.pipe
 import akka.stream.scaladsl.Source
 import akka.stream.{ActorMaterializer, Materializer}
@@ -27,11 +27,13 @@ object MessageBroker {
 
   // private state and events
   protected trait BrokerState
-  protected case object Initing extends BrokerState
+  protected case object InitingFlow extends BrokerState
+  protected case object WaitingForConsumer extends BrokerState
   protected case object Active extends BrokerState
 
   protected trait BrokerData
-  protected case class Partial(send: Option[TickerSendEnd], pending: Option[(ActorRef, Int)]) extends BrokerData
+  protected case object NoData extends BrokerData
+  protected case class HasFlow(send: TickerSendEnd) extends BrokerData
   protected case class Ready(send: TickerSendEnd,
                              consumer: ActorRef,
                              buffer: Queue[NewMessage],
@@ -44,73 +46,80 @@ object MessageBroker {
 }
 
 class MessageBroker(queueClient: QueueServiceClient, action: String, bufferLimit: Int)(implicit logging: Logging)
-    extends FSM[MessageBroker.BrokerState, MessageBroker.BrokerData] {
+    extends FSM[MessageBroker.BrokerState, MessageBroker.BrokerData]
+    with Stash {
   import MessageBroker._
 
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ex: ExecutionContext = context.dispatcher
 
-  startWith(Initing, Partial(None, None))
+  startWith(InitingFlow, NoData)
 
   establishFetchFlow() map {
     case (send, messages) => FlowReady(send, messages)
   } pipeTo self
 
-  when(Initing) {
-    case Event(FlowReady(send, messages), data @ Partial(None, pending)) =>
-      messages.runForeach { m =>
+  when(InitingFlow) {
+    case Event(FlowReady(send, messages), NoData) =>
+      messages runForeach { m =>
         self ! NewMessage(m)
       }
-      pending match {
-        case Some((consumer, demand)) =>
-          val buffer = Queue.empty[NewMessage]
-          val arriving = fillPipeline(send, buffer, demand, 0)
-          goto(Active).using(Ready(send, consumer, buffer, demand, arriving))
-        case None =>
-          stay.using(data.copy(send = Some(send)))
-      }
-    case Event(NeedMessage(n), data @ Partial(sendO, pending)) =>
-      val (consumer, demand) = pending map {
-        case (con, dem) => (con, dem + n)
-      } getOrElse ((sender(), n))
-      sendO match {
-        case Some(send) =>
-          val buffer = Queue.empty[NewMessage]
-          val arriving = fillPipeline(send, buffer, demand, 0)
-          goto(Active).using(Ready(send, consumer, buffer, demand, arriving))
-        case None =>
-          stay.using(data.copy(pending = Some((consumer, demand))))
-      }
+      goto(WaitingForConsumer).using(HasFlow(send))
+    case Event(_: NeedMessage, NoData) =>
+      stash()
+      stay()
+  }
+
+  when(WaitingForConsumer) {
+    case Event(NeedMessage(n), HasFlow(send)) =>
+      val buffer = Queue.empty[NewMessage]
+      val arriving = fillPipeline(send, buffer, n, 0)
+      goto(Active).using(Ready(send, sender(), buffer, n, arriving))
   }
 
   when(Active) {
     case Event(r: NewMessage, d @ Ready(send, consumer, buffer, demand, arriving)) =>
+      //println("new message arrived")
       val (newBuffer, newDemand) = serveFromBuffer(consumer, buffer.enqueue(r), demand)
       val newArriving = fillPipeline(send, newBuffer, newDemand, arriving - 1)
+      //println(s"new state: buf ${newBuffer.size}, dem $newDemand arr $newArriving")
       stay.using(d.change(newBuffer, newDemand, newArriving))
     case Event(NeedMessage(n), d @ Ready(send, consumer, buffer, demand, arriving)) =>
+      //println(s"demand received, $n")
       // first serve from buffer
       val (newBuffer, newDemand) = serveFromBuffer(consumer, buffer, demand + n)
       // then send demand to upstream, include filling buffer
       val newArriving = fillPipeline(send, newBuffer, newDemand, arriving)
+      //println(s"new state: buf ${newBuffer.size}, dem $newDemand, arr $newArriving")
       stay.using(d.change(newBuffer, newDemand, newArriving))
+  }
+
+  onTransition {
+    case InitingFlow -> WaitingForConsumer =>
+      unstashAll()
+    case WaitingForConsumer -> Active =>
   }
 
   private def serveFromBuffer(consumer: ActorRef, buffer: Queue[NewMessage], demand: Int): (Queue[NewMessage], Int) = {
     val provide = Math.min(demand, buffer.size)
     var newBuffer = buffer
     (0 until provide) foreach { _ =>
-      val (msg, b) = buffer.dequeue
+      val (msg, b) = newBuffer.dequeue
       consumer ! msg
       newBuffer = b
     }
-
+    //println(s"$provide msgs pushed to downstream")
     (newBuffer, demand - provide)
   }
 
   private def fillPipeline(send: TickerSendEnd, buffer: Queue[NewMessage], demand: Int, arriving: Int): Int = {
     val req = bufferLimit - buffer.size + demand - arriving
-    send.send(req)
+    if (req > 0) {
+      send.send(req)
+      //println(s"send demand to upstream, request $req")
+    } else {
+      //println(s"no need to request more messages")
+    }
     req + arriving
   }
 

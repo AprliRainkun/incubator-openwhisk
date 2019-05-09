@@ -8,28 +8,29 @@ import akka.stream._
 import akka.stream.scaladsl.{Broadcast, Flow, GraphDSL}
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
 import akka.util.Timeout
+import org.apache.openwhisk.grpc.Activation
 
 object ReactiveActivationFlow {
-  def create(handle: Queue.Handle): Flow[Int, DummyActivation, NotUsed] = {
+  def create(handle: Queue.Handle): Flow[Int, Activation, NotUsed] = {
     implicit val to: Timeout = Timeout.create(Duration.ofSeconds(10))
 
     val fetchFlow = Flow[Int].mapAsync(1) { n =>
       (handle.queue ? Queue.RequestAtMost(handle.key, n)).mapTo[Queue.Response]
     } map (_.as)
 
-    val flatFlow = Flow[List[DummyActivation]].mapConcat[DummyActivation](identity)
+    val flatFlow = Flow[List[Activation]].mapConcat[Activation](identity)
 
     Flow.fromGraph(GraphDSL.create() { implicit b =>
       import GraphDSL.Implicits._
 
-      val broadcast = b.add(Broadcast[List[DummyActivation]](2))
+      val broadcast = b.add(Broadcast[List[Activation]](2))
       val repeater = b.add(new RepeatUntilAccumulateToStage(handle))
       val fetcher = b.add(fetchFlow)
       val flatter = b.add(flatFlow)
 
       // format: off
       repeater.out ~>                 fetcher                 ~> broadcast ~> flatter
-      repeater.in1 <~ Flow[List[DummyActivation]].map(_.size) <~ broadcast
+      repeater.in1 <~ Flow[List[Activation]].map(_.size) <~ broadcast
       // format: on
       FlowShape(repeater.in0, flatter.out)
     })
