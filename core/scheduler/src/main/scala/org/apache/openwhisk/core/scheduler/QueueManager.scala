@@ -6,7 +6,8 @@ import akka.grpc.GrpcClientSettings
 import akka.pattern.pipe
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
-import org.apache.openwhisk.grpc.{Activation, WindowAdvertisement}
+import org.apache.openwhisk.core.entity.DocInfo
+import org.apache.openwhisk.grpc.{ActionIdentifier, Activation, WindowAdvertisement}
 
 import scala.concurrent.ExecutionContext
 
@@ -18,7 +19,7 @@ object QueueManager {
   def props(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) =
     Props(new QueueManager(etcdClientConfig, schedulerConfig))
 
-  final case class CreateQueue(name: String)
+  final case class CreateQueue(action: DocInfo)
   final case class QueueCreated()
 
   final case class AppendActivation(activation: Activation)
@@ -29,7 +30,7 @@ object QueueManager {
   final case class FetchStream(activations: Source[Activation, NotUsed])
   type EstablishResult = Either[QueueOperationError, FetchStream]
 
-  private case class ActionNameDiscovered(action: String,
+  private case class ActionNameDiscovered(action: DocInfo,
                                           windows: Source[WindowAdvertisement, NotUsed],
                                           sender: ActorRef)
 }
@@ -40,7 +41,7 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ex: ExecutionContext = context.dispatcher
 
-  private var queues = Map.empty[String, ActorRef]
+  private var queues = Map.empty[DocInfo, ActorRef]
 
   override def receive: Receive = {
     case CreateQueue(name) =>
@@ -50,7 +51,8 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
       }
       sender ! QueueCreated()
     case msg @ AppendActivation(act) =>
-      queues.get(act.actionName) match {
+      val actionId = parseDocInfo(act.action.head)
+      queues.get(actionId) match {
         case Some(queue) => queue forward msg
         case None =>
           sender ! Left(QueueNotExist)
@@ -60,7 +62,7 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
       mixed.prefixAndTail(1).runWith(Sink.head) map {
         case (first, remaining) =>
           // todo: warn when actionName is absent (default to "")
-          val action = first.head.getActionName
+          val action = parseDocInfo(first.head.getAction)
           ActionNameDiscovered(action, remaining, requester)
       } pipeTo self
     case ActionNameDiscovered(action, windows, requester) =>
@@ -69,4 +71,7 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
         case None        => requester ! Left(QueueNotExist)
       }
   }
+
+  private def parseDocInfo(action: ActionIdentifier) =
+    DocInfo ! (action.id, action.revision)
 }

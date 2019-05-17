@@ -1,22 +1,24 @@
 package org.apache.openwhisk.core.containerpool
 
 import akka.NotUsed
-import akka.actor.{ActorRef, FSM, Props, Stash}
+import akka.actor.{ActorRef, ActorSystem, FSM, Props, Stash}
 import akka.pattern.pipe
 import akka.stream.scaladsl.Source
 import akka.stream.{ActorMaterializer, Materializer}
 import org.apache.openwhisk.common._
+import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
+import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
-import scala.language.postfixOps
 
 object MessageBroker {
-  def props(queueClient: QueueServiceClient, action: String, bufferLimit: Int)(implicit logging: Logging) =
-    Props(new MessageBroker(queueClient, action, bufferLimit))
+  def props(action: DocInfo, bufferLimit: Int, queueMetadataStore: QueueMetadataStore)(implicit sys: ActorSystem,
+                                                                                       logging: Logging) =
+    Props(new MessageBroker(action, bufferLimit, queueMetadataStore))
 
   // messages
   final case class NeedMessage(number: Int)
@@ -45,7 +47,9 @@ object MessageBroker {
   }
 }
 
-class MessageBroker(queueClient: QueueServiceClient, action: String, bufferLimit: Int)(implicit logging: Logging)
+class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: QueueMetadataStore)(
+  implicit sys: ActorSystem,
+  logging: Logging)
     extends FSM[MessageBroker.BrokerState, MessageBroker.BrokerData]
     with Stash {
   import MessageBroker._
@@ -125,21 +129,30 @@ class MessageBroker(queueClient: QueueServiceClient, action: String, bufferLimit
 
   // override by unit tests
   protected def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
-    val (sendFuture, batchSizes) = Source
-      .fromGraph(new ConflatedTickerStage)
-      .throttle(1, 20 millis)
-      .map(b => WindowAdvertisement(Message.WindowsSize(b)))
-      .preMaterialize()
+    queueMetadataStore.getEndPoint(action) flatMap {
+      case (host, port) =>
+        val (sendFuture, sizes) = Source
+          .fromGraph(new ConflatedTickerStage)
+          .throttle(1, 20 millis)
+          .map(b => WindowAdvertisement(Message.WindowsSize(b)))
+          .preMaterialize()
+        val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
+        val source = Source(List(WindowAdvertisement(Message.Action(actionId)))).concat(sizes)
 
-    val windows = Source(List(WindowAdvertisement(Message.ActionName(action))))
-      .concat(batchSizes)
+        val client = SchedulerConnector.getClient(host, port)
+        val activations = client
+          .fetch(source)
+          .map(_.activation.head.body)
 
-    val activations = queueClient
-      .fetch(windows)
-      .map(w => w.activation.head.body)
-
-    sendFuture map { send =>
-      (send, activations)
+        sendFuture map { send =>
+          (send, activations)
+        }
+    } recoverWith {
+      case t =>
+        logging.error(
+          this,
+          s"failed to retrieve queue endpoint information from etcd for action ${action.toString}, $t")
+        Future.failed(t)
     }
   }
 }

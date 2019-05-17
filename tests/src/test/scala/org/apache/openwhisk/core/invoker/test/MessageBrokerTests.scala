@@ -1,13 +1,15 @@
 package org.apache.openwhisk.core.invoker.test
 
 import akka.NotUsed
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
 import akka.event.Logging
 import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.{Sink, Source}
 import akka.testkit.TestProbe
 import org.apache.openwhisk.common.{AkkaLogging, Logging}
 import org.apache.openwhisk.core.containerpool._
+import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
+import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.core.scheduler.test.{LocalScheduler, TestBase}
 import org.apache.openwhisk.grpc._
 import org.scalatest.OptionValues._
@@ -17,35 +19,42 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 object SlowNetworkMessageBroker {
-  def props(client: QueueServiceClient, action: String, bufferLimit: Int)(implicit logging: Logging) =
-    Props(new SlowNetworkMessageBroker(client, action, bufferLimit))
+  def props(action: DocInfo, bufferLimit: Int, queueMetadataStore: QueueMetadataStore)(implicit sys: ActorSystem,
+                                                                                       logging: Logging) =
+    Props(new SlowNetworkMessageBroker(action, bufferLimit, queueMetadataStore))
 }
 
 // simulate 40 millis RTT latency
-class SlowNetworkMessageBroker(client: QueueServiceClient, action: String, bufferLimit: Int)(implicit logging: Logging)
-    extends MessageBroker(client, action, bufferLimit) {
+class SlowNetworkMessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: QueueMetadataStore)(
+  implicit sys: ActorSystem,
+  logging: Logging)
+    extends MessageBroker(action, bufferLimit, queueMetadataStore) {
 
   override def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
     import org.apache.openwhisk.grpc.WindowAdvertisement.Message
     import org.apache.openwhisk.grpc._
 
-    val (sendFuture, batchSizes) = Source
-      .fromGraph(new ConflatedTickerStage)
-      .throttle(1, 20 millis)
-      .map(b => WindowAdvertisement(Message.WindowsSize(b)))
-      .preMaterialize()
+    queueMetadataStore.getEndPoint(action) flatMap {
+      case (host, port) =>
+        val (sendFuture, sizes) = Source
+          .fromGraph(new ConflatedTickerStage)
+          .throttle(1, 20 millis)
+          .map(b => WindowAdvertisement(Message.WindowsSize(b)))
+          .preMaterialize()
+        val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
+        val source = Source(List(WindowAdvertisement(Message.Action(actionId))))
+          .concat(sizes)
+          .delay(20 millis, DelayOverflowStrategy.backpressure)
 
-    val windows = Source(List(WindowAdvertisement(Message.ActionName(action))))
-      .concat(batchSizes)
-      .delay(20 millis, DelayOverflowStrategy.backpressure)
+        val client = SchedulerConnector.getClient(host, port)
+        val activations = client
+          .fetch(source)
+          .delay(20 millis, DelayOverflowStrategy.backpressure)
+          .map(_.activation.head.body)
 
-    val activations = client
-      .fetch(windows)
-      .delay(20 millis, DelayOverflowStrategy.backpressure)
-      .map(w => w.activation.head.body)
-
-    sendFuture map { send =>
-      (send, activations)
+        sendFuture map { send =>
+          (send, activations)
+        }
     }
   }
 }
@@ -62,30 +71,30 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
 
   "Message broker" should {
     "not produce more message than demanded" in {
-      val actionName = "messageBroker/test/action000"
-      createQueueAndAssert(actionName)
+      val action = createActionInfo("messageBroker/test/action000")
+      createQueueAndAssert(action)
 
-      val broker = system.actorOf(MessageBroker.props(schedulerClient, actionName, 5))
+      val broker = system.actorOf(MessageBroker.props(action, 5, queueMetadataStore))
 
-      runBatchFetch(broker, actionName, 500 millis)
+      runBatchFetch(broker, action, 500 millis)
       succeed
     }
 
     "behave correctly when the buffer is disabled" in {
-      val actionName = "messageBroker/test/action111"
-      createQueueAndAssert(actionName)
+      val action = createActionInfo("messageBroker/test/action111")
+      createQueueAndAssert(action)
 
-      val broker = system.actorOf(MessageBroker.props(schedulerClient, actionName, 0))
+      val broker = system.actorOf(MessageBroker.props(action, 5, queueMetadataStore))
 
-      runBatchFetch(broker, actionName, 500 millis)
+      runBatchFetch(broker, action, 500 millis)
       succeed
     }
 
     "receive ordered messages" in {
-      val actionName = "messageBroker/test/action222"
-      createQueueAndAssert(actionName)
+      val action = createActionInfo("messageBroker/test/action222")
+      createQueueAndAssert(action)
 
-      val broker = system.actorOf(MessageBroker.props(schedulerClient, actionName, 5))
+      val broker = system.actorOf(MessageBroker.props(action, 5, queueMetadataStore))
       val putNum = (1 to 10).sum
 
       val putsFut = (1 to putNum)
@@ -94,7 +103,8 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
             for {
               p <- prevF
               body = s"msg-$i"
-              _ <- schedulerClient.put(Activation(actionName, body))
+              actionId = ActionIdentifier(action.id.asString, action.rev.asString)
+              _ <- schedulerClient.put(Activation(Some(actionId), body))
             } yield body :: p
         }
         .map(_.reverse)
@@ -116,16 +126,16 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
     "show improved throughput with buffer in a slow network" in {
       val putNum = 500
 
-      val nameA = "messageBroker/test/action3331"
-      createQueueAndAssert(nameA)
+      val actionA = createActionInfo("messageBroker/test/action3331")
+      createQueueAndAssert(actionA)
       val brokerWithBuffer =
-        system.actorOf(SlowNetworkMessageBroker.props(schedulerClient, nameA, 5))
-      val bufferFut = timingForMessages(brokerWithBuffer, nameA, putNum)
+        system.actorOf(SlowNetworkMessageBroker.props(actionA, 5, queueMetadataStore))
+      val bufferFut = timingForMessages(brokerWithBuffer, actionA, putNum)
 
-      val nameB = "messageBroker/test/action3332"
-      createQueueAndAssert(nameB)
-      val brokerWOBuffer = system.actorOf(SlowNetworkMessageBroker.props(schedulerClient, nameB, 0))
-      val noBufferFut = timingForMessages(brokerWOBuffer, nameB, putNum)
+      val actionB = createActionInfo("messageBroker/test/action3332")
+      createQueueAndAssert(actionB)
+      val brokerWOBuffer = system.actorOf(SlowNetworkMessageBroker.props(actionB, 0, queueMetadataStore))
+      val noBufferFut = timingForMessages(brokerWOBuffer, actionB, putNum)
 
       for {
         bufferTime <- bufferFut
@@ -138,13 +148,15 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
     }
   }
 
-  private def timingForMessages(broker: ActorRef, actionName: String, total: Int): Future[FiniteDuration] = {
+  private def createActionInfo(name: String): DocInfo = DocInfo ! (name, "1")
+
+  private def timingForMessages(broker: ActorRef, action: DocInfo, total: Int): Future[FiniteDuration] = {
     val probe = TestProbe()
 
     for {
-      resp <- createQueue(actionName)
+      resp <- createQueue(action)
       _ = resp.status.value.statusCode should be(200)
-      _ <- seedNPuts(actionName, total)
+      _ <- seedNPuts(action, total)
       start = System.nanoTime()
       _ <- Source(1 to total).mapAsyncUnordered(2) { _ =>
         Future {
@@ -156,11 +168,11 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
     } yield (System.nanoTime() - start).nanos
   }
 
-  private def runBatchFetch(broker: ActorRef, actionName: String, noMsgWait: FiniteDuration): FiniteDuration = {
+  private def runBatchFetch(broker: ActorRef, action: DocInfo, noMsgWait: FiniteDuration): FiniteDuration = {
     val putNum = (1 to 10).sum
 
     val putFut = for {
-      _ <- seedNPuts(actionName, putNum)
+      _ <- seedNPuts(action, putNum)
     } yield ()
     Await.result(putFut, 5 seconds)
 
@@ -178,22 +190,24 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
     (System.currentTimeMillis() - start) millis
   }
 
-  private def createQueueAndAssert(action: String): Unit = {
+  private def createQueueAndAssert(action: DocInfo): Unit = {
     val fut = createQueue(action)
     val resp = Await.result(fut, 3 seconds)
     resp.status.value.statusCode should be(200)
   }
 
-  private def createQueue(actionName: String): Future[CreateQueueResponse] = {
+  private def createQueue(action: DocInfo): Future[CreateQueueResponse] = {
     val tid = TransactionId("tid_000")
-    val req = CreateQueueRequest(Some(tid), actionName)
+    val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
+    val req = CreateQueueRequest(Some(tid), Some(actionId))
     schedulerClient.create(req)
   }
 
-  private def seedNPuts(actionName: String, num: Int): Future[Unit] = {
+  private def seedNPuts(action: DocInfo, num: Int): Future[Unit] = {
+    val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
     val seed = (1 to num).toList
     Future.traverse(seed) { i =>
-      schedulerClient.put(Activation(actionName)) map { resp =>
+      schedulerClient.put(Activation(Some(actionId))) map { resp =>
         resp.status.value.statusCode should be(200)
       }
     } map (_ => ())

@@ -2,7 +2,7 @@ package org.apache.openwhisk.core.containerpool
 
 import java.time.Instant
 
-import akka.actor.{Actor, ActorRef}
+import akka.actor.{Actor, ActorRef, Props}
 import akka.pattern.pipe
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.connector.ActivationMessage
@@ -17,11 +17,19 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 object ContainerProxySlim {
+  def props(pool: ActorRef,
+            poolConfig: ContainerPoolConfig,
+            containerName: String,
+            factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
+            triggerTid: TransactionId,
+            initTimeout: FiniteDuration,
+            action: ExecutableWhiskAction)(implicit logging: Logging, instance: InvokerInstanceId): Props =
+    Props(new ContainerProxySlim(pool, poolConfig, containerName, factory, triggerTid, initTimeout, action))
 
   // messages
-  final case object Initialized
-  final case class Start(tid: TransactionId, msg: ActivationMessage)
-  final case class Done(tid: TransactionId, msg: ActivationMessage, activationResult: WhiskActivation)
+  final case class InitResult(result: Either[String, Container])
+  final case class Start(msg: ActivationMessage)
+  final case class Done(msg: ActivationMessage, activationResult: WhiskActivation)
   final case object Removed
 
   // private messages
@@ -30,6 +38,7 @@ object ContainerProxySlim {
 
 class ContainerProxySlim(pool: ActorRef,
                          poolConfig: ContainerPoolConfig,
+                         containerName: String,
                          factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
                          triggerTid: TransactionId,
                          initTimeout: FiniteDuration,
@@ -40,33 +49,43 @@ class ContainerProxySlim(pool: ActorRef,
 
   factory(
     triggerTid,
-    ContainerProxy.containerName(instance, action.namespace.asString, action.name.asString),
+    containerName,
     action.exec.image,
     action.exec.pull,
     action.limits.memory.megabytes.MB,
     poolConfig.cpuShare(action.limits.memory.megabytes.MB))
     .flatMap { container =>
       implicit val tid: TransactionId = triggerTid
-      initContainer(container, action, initTimeout) map (_ => ContainerInitialized(container))
+      initContainer(container, action, initTimeout)
     } pipeTo self
 
   override def receive: Receive = {
-    case ContainerInitialized(container) =>
-      context.become(initialized(container))
-      pool ! Initialized
+    case InitResult(result) =>
+      result foreach { container =>
+        context.become(initialized(container))
+      }
+      pool ! result
   }
 
   private def initialized(container: Container): Receive = {
-    case Start(tid, msg) =>
-      implicit val transId: TransactionId = tid
+    case Start(msg) =>
+      implicit val tid: TransactionId = msg.transid
       run(container, action, msg) map { result =>
-        Done(tid, msg, result)
+        Done(msg, result)
       } pipeTo pool
   }
 
   private def initContainer(container: Container, action: ExecutableWhiskAction, timeout: FiniteDuration)(
-    implicit tid: TransactionId): Future[Unit] = {
-    container.initialize(action.containerInitializer, timeout, action.limits.concurrency.maxConcurrent).map(_ => ())
+    implicit tid: TransactionId): Future[InitResult] = {
+    container
+      .initialize(action.containerInitializer, timeout, action.limits.concurrency.maxConcurrent)
+      .map { _ =>
+        InitResult(Right(container))
+      } recoverWith {
+      case t =>
+        logging.error(this, s"container $containerName failed to initialize, $t")
+        Future.successful(InitResult(Left("failed")))
+    }
   }
 
   private def run(container: Container, action: ExecutableWhiskAction, msg: ActivationMessage)(

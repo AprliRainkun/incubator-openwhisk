@@ -36,11 +36,13 @@ class GrpcSetupTests
     system.terminate()
   }
 
+  val actionId = ActionIdentifier("ns/pkg/act", "1")
+
   "Queue service server" should {
     "expose its fetch method" in {
-      import WindowAdvertisement.Message.{ActionName, WindowsSize}
+      import WindowAdvertisement.Message.{Action, WindowsSize}
 
-      val windows = WindowAdvertisement(ActionName("ns/pkg/act")) ::
+      val windows = WindowAdvertisement(Action(actionId)) ::
         List.fill(3)(WindowAdvertisement(WindowsSize(1)))
       val activations = client.fetch(Source(windows))
       val probe = TestProbe()
@@ -56,7 +58,7 @@ class GrpcSetupTests
     }
 
     "expose its put method" in {
-      val act = Activation("ns/pkg/act")
+      val act = Activation(Some(actionId))
 
       val resp = Await.result(client.put(act), 3.seconds)
 
@@ -65,7 +67,7 @@ class GrpcSetupTests
 
     "expose its create method" in {
       val tid = TransactionId("#tid_000")
-      val act = CreateQueueRequest(Option(tid), "ns/pkg/act")
+      val act = CreateQueueRequest(Option(tid), Some(actionId))
 
       val resp = Await.result(client.create(act), 3.seconds)
 

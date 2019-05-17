@@ -5,7 +5,7 @@ import akka.grpc.GrpcClientSettings
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.TestKit
 import com.google.protobuf.ByteString
-import org.apache.openwhisk.core.database.etcd.QueueMetadataStoreConfig
+import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.database.etcd.Utils.rangeEndOfPrefix
 import org.apache.openwhisk.core.scheduler._
 import org.apache.openwhisk.grpc.QueueServiceClient
@@ -54,9 +54,15 @@ abstract class TestBase(sysName: String)
 trait LocalScheduler { this: TestBase =>
   def schedulerPort: Int
 
-  val storeConfig = QueueMetadataStoreConfig(entityPrefix + "queue/%s/marker", entityPrefix + "queue/%s/endpoint")
-
   private val local = "127.0.0.1"
+
+  val queueMetadataStoreConfig = QueueMetadataStoreConfig(
+    entityPrefix + "queue/%s#%s/marker",
+    entityPrefix + "queue/%s#%s/endpoint",
+    etcdHost,
+    etcdPort)
+
+  val queueMetadataStore: QueueMetadataStore = QueueMetadataStore.connect(queueMetadataStoreConfig)
 
   def schedulerClient: QueueServiceClient = {
     val config = GrpcClientSettings.connectToServiceAt(local, schedulerPort).withTls(false)
@@ -65,11 +71,11 @@ trait LocalScheduler { this: TestBase =>
 
   override def beforeAll(): Unit = {
     implicit val etcdSettings: GrpcClientSettings = etcdClientSettings
-    implicit val schedulerConfig: SchedulerConfig = SchedulerConfig(local, storeConfig)
+    implicit val schedulerConfig: SchedulerConfig = SchedulerConfig(s"$local:$schedulerPort")
 
     val manager = system.actorOf(QueueManager.props(etcdSettings, schedulerConfig))
-
-    val srv = new QueueServiceServer(new RpcEndpoint(manager)).run(local, schedulerPort)
+    val srv = new QueueServiceServer(new RpcEndpoint(manager, queueMetadataStore))
+      .run(local, schedulerPort)
     Await.result(srv, 5.seconds)
   }
 }

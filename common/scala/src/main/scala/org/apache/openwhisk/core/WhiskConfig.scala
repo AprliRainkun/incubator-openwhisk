@@ -247,6 +247,8 @@ object ConfigKeys {
   val activationStore = "whisk.activation-store"
   val activationStoreWithFileStorage = s"$activationStore.with-file-storage"
 
+  val queueMetadataStore = "whisk.queue-metadata-store"
+
   val metrics = "whisk.metrics"
   val featureFlags = "whisk.feature-flags"
 }

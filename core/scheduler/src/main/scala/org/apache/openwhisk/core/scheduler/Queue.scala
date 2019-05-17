@@ -2,6 +2,7 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props, Timers}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.grpc.Activation
 
 import scala.collection.immutable
@@ -10,7 +11,7 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 object Queue {
-  def props(name: String) = Props(new Queue(name))
+  def props(action: DocInfo) = Props(new Queue(action))
 
   final case class Handle(queue: ActorRef, key: Long)
   final case class CancelFetch(key: Long)
@@ -24,7 +25,7 @@ object Queue {
   private case object TTick
 }
 
-class Queue(name: String) extends Actor with Timers with ActorLogging {
+class Queue(action: DocInfo) extends Actor with Timers with ActorLogging {
   import Queue._
   import QueueManager._
 
