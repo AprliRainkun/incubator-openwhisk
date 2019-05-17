@@ -16,14 +16,18 @@ service QueueService {
     }
 }
 
+message ActionIdentifier {
+    string id = 1;
+    string revision = 2;
+}
+
 message Activation {
-    TransactionId tid = 1;
-    string actionName = 2;
-    bytes payload = 3;
+    ActionIdentifier action = 1;
+    string body = 2;
 }
 
 message TransactionId {
-    string id = 1;
+    string raw = 1;
 }
 
 message PutActivationResponse {
@@ -37,7 +41,7 @@ message ResponseStatus {
 
 message WindowAdvertisement {
     oneof message {
-        string actionName = 1;
+        ActionIdentifier action = 1;
         int32 windowsSize = 2;
     }
 }
@@ -49,7 +53,7 @@ message FetchActivationResponse {
 
 message CreateQueueRequest {
     TransactionId tid = 1;
-    string actionName = 2;
+    ActionIdentifier action = 2;
 }
 
 message CreateQueueResponse {

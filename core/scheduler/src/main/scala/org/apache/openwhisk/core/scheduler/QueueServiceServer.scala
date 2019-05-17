@@ -14,8 +14,7 @@ class QueueServiceServer(impl: QueueService)(implicit sys: ActorSystem) {
 
   def run(listen: String, port: Int): Future[Unit] = {
     // create service handler
-    val service =
-      QueueServiceHandler(impl)
+    val service = QueueServiceHandler(impl)
 
     Http()
       .bindAndHandleAsync(service, listen, port, HttpConnectionContext(http2 = Always))

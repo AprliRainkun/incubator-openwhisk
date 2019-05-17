@@ -23,7 +23,8 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   "Queue creation service" should {
     "be reachable" in {
       val tid = TransactionId("#tid_000")
-      val req = CreateQueueRequest(Some(tid), "ns/pkg/act")
+      val actionId = ActionIdentifier("ns/pkg/act", "1")
+      val req = CreateQueueRequest(Some(tid), Some(actionId))
 
       schedulerClient.create(req) map { resp =>
         resp.status.value.statusCode should be(200)
@@ -32,14 +33,15 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
 
     "create a queue and write endpoint to etcd" in {
-      val actionName = "ns/pkg/act2"
+      val actionId = ActionIdentifier("ns/pkg/act2", "1")
       val tid = TransactionId("#tid_000")
-      val req = CreateQueueRequest(Some(tid), actionName)
+      val req = CreateQueueRequest(Some(tid), Some(actionId))
 
       schedulerClient.create(req) flatMap { resp =>
         resp.status.value.statusCode should be(200)
 
-        val req = RangeRequest(key = ByteString.copyFromUtf8(storeConfig.endpointKeyTemplate.format(actionName)))
+        val req = RangeRequest(key =
+          ByteString.copyFromUtf8(queueMetadataStoreConfig.endpointKeyTemplate.format(actionId.id, actionId.revision)))
         kvClient.range(req)
       } map { resp =>
         resp.kvs.head.value should be(ByteString.copyFromUtf8(local))
@@ -49,20 +51,20 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
 
   "Put and fetch" should {
     "work when first put some then fetch all" in {
-      val actionName = "ns/pkg/act222"
+      val actionId = ActionIdentifier("ns/pkg/act222", "1")
       val putNumber = 3
 
       val putFut = for {
-        resp <- createQueue(actionName)
+        resp <- createQueue(actionId)
         _ = resp.status.value.statusCode should be(200)
-        _ <- seedNPuts(actionName, putNumber)
+        _ <- seedNPuts(actionId, putNumber)
       } yield ()
       Await.result(putFut, 5.seconds)
 
       val (sender, source) = Utils.feedAndSource[WindowAdvertisement]
       val recv = schedulerClient.fetch(source).runWith(TestSink.probe)
 
-      List(Message.ActionName(actionName), Message.WindowsSize(putNumber))
+      List(Message.Action(actionId), Message.WindowsSize(putNumber))
         .map(WindowAdvertisement(_))
         .foreach(sender.sendNext)
 
@@ -70,7 +72,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
       (1 to putNumber) foreach { _ =>
         val resp = recv.expectNext(2.seconds)
         resp.status.value.statusCode should be(200)
-        resp.activation.value.actionName should be(actionName)
+        resp.activation.value.action.value should be(actionId)
       }
 
       sender.sendComplete()
@@ -80,17 +82,17 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
 
     "serve concurrent fetchers" in {
-      val actionName = "ns/pkg/act23234"
+      val actionId = ActionIdentifier("ns/pkg/act23234", "1")
       val putNumberUnit = 10
       val fetcherNumber = 3
 
-      val createFut = createQueue(actionName) map { resp =>
+      val createFut = createQueue(actionId) map { resp =>
         resp.status.value.statusCode should be(200)
       }
       Await.result(createFut, 3.seconds)
 
       val fetchAsserts = (1 to fetcherNumber) map { _ =>
-        val windows = (Message.ActionName(actionName) :: (1 to 4).map(Message.WindowsSize).toList) map { m =>
+        val windows = (Message.Action(actionId) :: (1 to 4).map(Message.WindowsSize).toList) map { m =>
           WindowAdvertisement(m)
         }
         schedulerClient
@@ -100,7 +102,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
           .map(n => n should be(10))
       } toList
 
-      val putFut = seedNPuts(actionName, putNumberUnit * fetcherNumber)
+      val putFut = seedNPuts(actionId, putNumberUnit * fetcherNumber)
 
       val combinedFut = for {
         _ <- Future.traverse(fetchAsserts)(identity)
@@ -112,13 +114,13 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
 
     "not reply with any message when the queue is drained" in {
-      val actionName = "ns/pkg/act333"
+      val actionId = ActionIdentifier("ns/pkg/act333", "1")
       val putNumber = 3
 
       val putFut = for {
-        resp <- createQueue(actionName)
+        resp <- createQueue(actionId)
         _ = resp.status.value.statusCode should be(200)
-        _ <- seedNPuts(actionName, putNumber)
+        _ <- seedNPuts(actionId, putNumber)
       } yield ()
       Await.result(putFut, 3.seconds)
 
@@ -126,7 +128,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
       val recv = schedulerClient.fetch(source).runWith(TestSink.probe)
 
       // drain all puts
-      List(Message.ActionName(actionName), Message.WindowsSize(putNumber))
+      List(Message.Action(actionId), Message.WindowsSize(putNumber))
         .map(WindowAdvertisement(_))
         .foreach(sender.sendNext)
       recv.request(putNumber)
@@ -139,7 +141,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
 
       // put more activation
       val additional = 2
-      val newPut = seedNPuts(actionName, additional)
+      val newPut = seedNPuts(actionId, additional)
       Await.result(newPut, 3.seconds)
 
       // now we should be able to receive
@@ -154,20 +156,20 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
 
     "not send more activations than requested" in {
-      val actionName = "ns/pkg/act444"
+      val actionId = ActionIdentifier("ns/pkg/act444", "1")
       val putNum = 10
 
       val putFut = for {
-        resp <- createQueue(actionName)
+        resp <- createQueue(actionId)
         _ = resp.status.value.statusCode should be(200)
-        _ <- seedNPuts(actionName, putNum)
+        _ <- seedNPuts(actionId, putNum)
       } yield ()
       Await.result(putFut, 3.seconds)
 
       val (sender, source) = Utils.feedAndSource[WindowAdvertisement]
       val recv = schedulerClient.fetch(source).runWith(TestSink.probe)
 
-      sender.sendNext(WindowAdvertisement(Message.ActionName(actionName)))
+      sender.sendNext(WindowAdvertisement(Message.Action(actionId)))
       recv.request(10)
 
       (1 to 4) foreach { n =>
@@ -184,13 +186,13 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
 
     "not loss activation when fetcher cancelled" in {
-      val actionName = "ns/pkg/act555"
+      val actionId = ActionIdentifier("ns/pkg/act555", "1")
       val putNum = 10
 
       val putFut = for {
-        resp <- createQueue(actionName)
+        resp <- createQueue(actionId)
         _ = resp.status.value.statusCode should be(200)
-        _ <- seedNPuts(actionName, putNum)
+        _ <- seedNPuts(actionId, putNum)
       } yield ()
       Await.result(putFut, 3.seconds)
 
@@ -198,7 +200,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
         val (sender, source) = Utils.feedAndSource[WindowAdvertisement]
         val recv = schedulerClient.fetch(source).runWith(TestSink.probe)
 
-        List(Message.ActionName(actionName), Message.WindowsSize(n))
+        List(Message.Action(actionId), Message.WindowsSize(n))
           .map(WindowAdvertisement(_))
           .foreach(sender.sendNext)
 
@@ -214,16 +216,14 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
     }
   }
 
-  private def createQueue(actionName: String): Future[CreateQueueResponse] = {
+  private def createQueue(actionId: ActionIdentifier): Future[CreateQueueResponse] = {
     val tid = TransactionId("#tid_000")
-    val req = CreateQueueRequest(Some(tid), actionName)
+    val req = CreateQueueRequest(Some(tid), Some(actionId))
     schedulerClient.create(req)
   }
 
-  private def seedNPuts(actionName: String, num: Int): Future[Unit] = {
-    val tid = TransactionId("#tid_000")
-
+  private def seedNPuts(actionId: ActionIdentifier, num: Int): Future[Unit] = {
     val seed = (1 to num).toList
-    Future.traverse(seed)(_ => schedulerClient.put(Activation(Some(tid), actionName, ByteString.EMPTY))) map (_ => ())
+    Future.traverse(seed)(_ => schedulerClient.put(Activation(Some(actionId)))) map (_ => ())
   }
 }

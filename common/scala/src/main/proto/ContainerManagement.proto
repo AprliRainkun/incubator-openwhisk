@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.apache.openwhisk.grpc";
+
+package container;
+
+import "ActivationQueue.proto";
+
+service ContainerManagementService {
+    rpc Allocate(AllocateRequest) returns (AllocateResponse) {}
+}
+
+message AllocateRequest {
+    activation.TransactionId tid = 1;
+    activation.ActionIdentifier action = 2;
+    int32 number = 3;
+}
+
+message AllocateResponse {
+    activation.ResponseStatus status = 1;
+}

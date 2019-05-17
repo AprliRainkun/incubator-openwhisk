@@ -2,6 +2,8 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props, Timers}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.core.entity.DocInfo
+import org.apache.openwhisk.grpc.Activation
 
 import scala.collection.immutable
 import scala.collection.mutable.ListBuffer
@@ -9,13 +11,13 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 object Queue {
-  def props(name: String) = Props(new Queue(name))
+  def props(action: DocInfo) = Props(new Queue(action))
 
   final case class Handle(queue: ActorRef, key: Long)
   final case class CancelFetch(key: Long)
   // n most be nonzero
   final case class RequestAtMost(key: Long, n: Int)
-  final case class Response(as: List[DummyActivation])
+  final case class Response(as: List[Activation])
 
   // fetcher will be set to Some(f) when the first RequestAtMost message is received
   private case class Registration(n: Int, fetcher: ActorRef)
@@ -23,7 +25,7 @@ object Queue {
   private case object TTick
 }
 
-class Queue(name: String) extends Actor with Timers with ActorLogging {
+class Queue(action: DocInfo) extends Actor with Timers with ActorLogging {
   import Queue._
   import QueueManager._
 
@@ -31,7 +33,7 @@ class Queue(name: String) extends Actor with Timers with ActorLogging {
   implicit val mat: Materializer = ActorMaterializer()
 
   private var counter = 0L
-  private var queue = immutable.Queue.empty[DummyActivation]
+  private var queue = immutable.Queue.empty[Activation]
   private var waitingList = Map.empty[Long, Registration]
 
   timers.startPeriodicTimer(TKey, TTick, 5.seconds)
@@ -44,6 +46,7 @@ class Queue(name: String) extends Actor with Timers with ActorLogging {
       servePendingFetch()
     case EstablishFetchStream(windows) =>
       val key = nextKey
+      log.debug(s"reactive activation flow established, key = $key")
 
       val flow = ReactiveActivationFlow.create(Handle(self, key))
       val stream = windows.map(w => w.getWindowsSize).via(flow)
@@ -81,7 +84,7 @@ class Queue(name: String) extends Actor with Timers with ActorLogging {
 
   private def dispatchAtMostNToFetcher(n: Int, fetcher: ActorRef, key: Long): Unit = {
     val send = Math.min(n, queue.size)
-    val es = ListBuffer.empty[DummyActivation]
+    val es = ListBuffer.empty[Activation]
     (1 to send) foreach { _ =>
       val (elem, newQueue) = queue.dequeue
       es.append(elem)

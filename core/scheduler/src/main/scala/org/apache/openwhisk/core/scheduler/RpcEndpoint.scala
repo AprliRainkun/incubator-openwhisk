@@ -7,8 +7,8 @@ import akka.pattern.ask
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
-import com.google.protobuf.ByteString
 import org.apache.openwhisk.core.database.etcd._
+import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.core.scheduler.QueueManager._
 import org.apache.openwhisk.grpc._
 
@@ -16,20 +16,20 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
 
-class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClientSettings,
-                                          schedulerConfig: SchedulerConfig,
-                                          mat: Materializer,
-                                          ctx: ExecutionContext)
+class RpcEndpoint(queueManager: ActorRef, queueMetadataStore: QueueMetadataStore)(
+  implicit etcdClientSettings: GrpcClientSettings,
+  schedulerConfig: SchedulerConfig,
+  mat: Materializer,
+  ctx: ExecutionContext)
     extends QueueService {
-
-  private val metadataStore = QueueMetadataStore.connect(schedulerConfig.queueMetadataStoreConfig, etcdClientSettings)
 
   override def create(in: CreateQueueRequest): Future[CreateQueueResponse] = {
     implicit val timeout: Timeout = Timeout(5 second)
 
+    val docInfo = parseDocInfo(in.action.head)
     for {
-      _ <- (queueManager ? CreateQueue(in.actionName)).mapTo[QueueCreated]
-      _ <- metadataStore.txnWriteEndpoint(in.actionName, schedulerConfig.endpoint)
+      _ <- (queueManager ? CreateQueue(docInfo)).mapTo[QueueCreated]
+      _ <- queueMetadataStore.txnWriteEndpoint(docInfo, schedulerConfig.endpoint)
     } yield {
       CreateQueueResponse(Some(ok), schedulerConfig.endpoint)
     }
@@ -38,8 +38,7 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
   override def put(in: Activation): Future[PutActivationResponse] = {
     implicit val timeout: Timeout = Timeout(5 seconds)
 
-    val act = DummyActivation(in.actionName)
-    (queueManager ? AppendActivation(act)).mapTo[AppendResult] map {
+    (queueManager ? AppendActivation(in)).mapTo[AppendResult] map {
       case Right(_)            => ok
       case Left(QueueNotExist) => notFound
       case Left(Overloaded)    => ResponseStatus(429, "queue too long, try later")
@@ -51,15 +50,16 @@ class RpcEndpoint(queueManager: ActorRef)(implicit etcdClientSettings: GrpcClien
 
     val fut = (queueManager ? EstablishFetchStream(windows)).mapTo[EstablishResult] map {
       case Right(FetchStream(acts)) =>
-        acts.map { dummy =>
-          val msg = Activation(Some(TransactionId("#tid_from_dummy_activation")), dummy.action, ByteString.EMPTY)
-          FetchActivationResponse(Some(ok), Some(msg))
+        acts.map { act =>
+          FetchActivationResponse(Some(ok), Some(act))
         }
       case Left(QueueNotExist) => Source(List(FetchActivationResponse(Some(notFound))))
-      case _ => ???
+      case _                   => ???
     }
     Source.fromFuture(fut) flatMapConcat identity
   }
+
+  private def parseDocInfo(action: ActionIdentifier) = DocInfo ! (action.id, action.revision)
 
   private def ok = ResponseStatus(200, "success")
 
