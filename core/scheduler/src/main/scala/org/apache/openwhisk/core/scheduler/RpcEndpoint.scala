@@ -2,7 +2,6 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.NotUsed
 import akka.actor.ActorRef
-import akka.grpc.GrpcClientSettings
 import akka.pattern.ask
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
@@ -16,10 +15,8 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.postfixOps
 
-class RpcEndpoint(queueManager: ActorRef, queueMetadataStore: QueueMetadataStore)(
-  implicit etcdClientSettings: GrpcClientSettings,
-  schedulerConfig: SchedulerConfig,
-  mat: Materializer,
+class RpcEndpoint(queueManager: ActorRef, queueMetadataStore: QueueMetadataStore, schedulerConfig: SchedulerConfig)(
+  implicit mat: Materializer,
   ctx: ExecutionContext)
     extends QueueService {
 

@@ -183,6 +183,10 @@
   set_fact:
     invoker_ports_to_expose: "{{ invoker_ports_to_expose }} + [ \"{{ jmx.basePortInvoker + (invoker_index | int) }}:{{ jmx.basePortInvoker + (invoker_index | int) }}\" ] + [ \"{{ jmx.rmiBasePortInvoker + (invoker_index | int) }}:{{ jmx.rmiBasePortInvoker + (invoker_index | int) }}\" ]"
 
+- name: expose grpc service port
+  set_fact:
+    invoker_grpc_port: "{{ invoker.grpc.port + (invoker_index | int) }}"
+    invoker_ports_to_expose:  "{{ invoker_ports_to_expose }} + [ \"{{ invoker_grpc_port }}:{{ invoker_grpc_port }}\" ]"
 
 - name: Load config from template
   set_fact:
@@ -218,6 +222,9 @@
       "CONFIG_whisk_couchdb_databases_WhiskAuth": "{{ db.whisk.auth }}"
       "CONFIG_whisk_couchdb_databases_WhiskEntity": "{{ db.whisk.actions }}"
       "CONFIG_whisk_couchdb_databases_WhiskActivation": "{{ db.whisk.activations }}"
+      "CONFIG_whisk_metadataStore_host": "{{ etcd.host }}"
+      "CONFIG_whisk_metadataStore_port": "{{ etcd.port }}"
+      "CONFIG_whisk_invoker_grpc_port": "{{ invoker_grpc_port }}"
       "DB_WHISK_ACTIONS": "{{ db.whisk.actions }}"
       "DB_WHISK_ACTIVATIONS": "{{ db.whisk.activations }}"
       "DB_WHISK_AUTHS": "{{ db.whisk.auth }}"

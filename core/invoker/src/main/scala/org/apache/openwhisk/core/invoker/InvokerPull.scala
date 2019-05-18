@@ -7,7 +7,7 @@ import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.containerpool._
 import org.apache.openwhisk.core.containerpool.logging.LogStoreProvider
 import org.apache.openwhisk.core.database._
-import org.apache.openwhisk.core.database.etcd.{QueueMetadataStore, QueueMetadataStoreConfig}
+import org.apache.openwhisk.core.database.etcd.{QueueMetadataStore, MetadataStoreConfig}
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.{ConfigKeys, WhiskConfig}
 import org.apache.openwhisk.spi.SpiLoader
@@ -68,7 +68,7 @@ class InvokerPull(config: WhiskConfig,
   private val entityStore = WhiskEntityStore.datastore()
   private val activationStore =
     SpiLoader.get[ActivationStoreProvider].instance(actorSystem, mat, logging)
-  private val queueMetadataStoreConfig = loadConfigOrThrow[QueueMetadataStoreConfig](ConfigKeys.queueMetadataStore)
+  private val queueMetadataStoreConfig = loadConfigOrThrow[MetadataStoreConfig](ConfigKeys.metadataStore)
   private val queueMetadataStore = QueueMetadataStore.connect(queueMetadataStoreConfig)
 
   // pool manager

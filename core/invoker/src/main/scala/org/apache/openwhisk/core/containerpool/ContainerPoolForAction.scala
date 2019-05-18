@@ -28,7 +28,7 @@ object ContainerPoolForAction {
 
   // private data
   private case class ContainerDescriptor(name: String, capacity: Int, action: WhiskAction) {
-    def changeCapacity(cap: Int) = copy(capacity = cap)
+    def changeCapacity(cap: Int): ContainerDescriptor = copy(capacity = cap)
   }
 
   // private message

@@ -244,10 +244,12 @@ object ConfigKeys {
   val controller = s"whisk.controller"
   val controllerActivation = s"$controller.activation"
 
+  val scheduler = "whisk.scheduler"
+
   val activationStore = "whisk.activation-store"
   val activationStoreWithFileStorage = s"$activationStore.with-file-storage"
 
-  val queueMetadataStore = "whisk.queue-metadata-store"
+  val metadataStore = "whisk.metadata-store"
 
   val metrics = "whisk.metrics"
   val featureFlags = "whisk.feature-flags"

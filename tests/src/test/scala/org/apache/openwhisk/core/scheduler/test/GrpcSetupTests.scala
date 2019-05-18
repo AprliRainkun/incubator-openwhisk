@@ -5,6 +5,7 @@ import akka.grpc.GrpcClientSettings
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{TestKit, TestProbe}
+import org.apache.openwhisk.common.{AkkaLogging, Logging}
 import org.apache.openwhisk.core.scheduler._
 import org.apache.openwhisk.grpc._
 import org.junit.runner.RunWith
@@ -27,6 +28,7 @@ class GrpcSetupTests
   implicit val sys: ActorSystem = system
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
+  implicit val logging: Logging = new AkkaLogging(akka.event.Logging.getLogger(sys, this))
 
   override def beforeAll(): Unit = {
     new QueueServiceServer(new QueueServiceDraftImpl()).run(local, port)

@@ -1,4 +1,4 @@
-package org.apache.openwhisk.common
+package org.apache.openwhisk.core.database.etcd.tests
 
 import akka.actor.ActorSystem
 import akka.grpc.GrpcClientSettings

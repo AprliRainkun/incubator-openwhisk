@@ -28,7 +28,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
 
       schedulerClient.create(req) map { resp =>
         resp.status.value.statusCode should be(200)
-        resp.endpoint should be(local)
+        resp.endpoint should be(s"$local:$schedulerPort")
       }
     }
 
@@ -41,10 +41,10 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
         resp.status.value.statusCode should be(200)
 
         val req = RangeRequest(key =
-          ByteString.copyFromUtf8(queueMetadataStoreConfig.endpointKeyTemplate.format(actionId.id, actionId.revision)))
+          ByteString.copyFromUtf8(metadataStoreConfig.queueEndpointKeyTemplate.format(actionId.id, actionId.revision)))
         kvClient.range(req)
       } map { resp =>
-        resp.kvs.head.value should be(ByteString.copyFromUtf8(local))
+        resp.kvs.head.value should be(ByteString.copyFromUtf8(s"$local:$schedulerPort"))
       }
     }
   }

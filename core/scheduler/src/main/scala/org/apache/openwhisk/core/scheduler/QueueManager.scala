@@ -2,7 +2,6 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorRef, Props}
-import akka.grpc.GrpcClientSettings
 import akka.pattern.pipe
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
@@ -16,8 +15,7 @@ case object QueueNotExist extends QueueOperationError
 case object Overloaded extends QueueOperationError
 
 object QueueManager {
-  def props(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) =
-    Props(new QueueManager(etcdClientConfig, schedulerConfig))
+  def props() = Props(new QueueManager)
 
   final case class CreateQueue(action: DocInfo)
   final case class QueueCreated()
@@ -35,7 +33,7 @@ object QueueManager {
                                           sender: ActorRef)
 }
 
-class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) extends Actor {
+class QueueManager extends Actor {
   import QueueManager._
 
   implicit val mat: Materializer = ActorMaterializer()
@@ -44,10 +42,10 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
   private var queues = Map.empty[DocInfo, ActorRef]
 
   override def receive: Receive = {
-    case CreateQueue(name) =>
-      if (!queues.contains(name)) {
-        val queue = context.actorOf(Queue.props(name))
-        queues = queues + (name -> queue)
+    case CreateQueue(action) =>
+      if (!queues.contains(action)) {
+        val queue = context.actorOf(Queue.props(action))
+        queues = queues + (action -> queue)
       }
       sender ! QueueCreated()
     case msg @ AppendActivation(act) =>

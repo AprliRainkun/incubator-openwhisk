@@ -37,6 +37,10 @@ case class InvokerInstanceId(val instance: Int,
   override def toString: String = (Seq("invoker" + instance) ++ uniqueName ++ displayedName).mkString("/")
 }
 
+case class SchedulerInstanceId(instance: Int) {
+  override def toString: String = s"scheduler$instance"
+}
+
 case class ControllerInstanceId(val asString: String) {
   require(
     asString.length <= MAX_NAME_LENGTH && asString.matches(LEGAL_CHARS),
@@ -46,6 +50,10 @@ case class ControllerInstanceId(val asString: String) {
 object InvokerInstanceId extends DefaultJsonProtocol {
   import org.apache.openwhisk.core.entity.size.{serdes => xserds}
   implicit val serdes = jsonFormat4(InvokerInstanceId.apply)
+}
+
+object SchedulerInstanceId extends DefaultJsonProtocol {
+  implicit val serdes = jsonFormat1(SchedulerInstanceId.apply)
 }
 
 object ControllerInstanceId extends DefaultJsonProtocol {
