@@ -9,7 +9,7 @@ import akka.testkit.TestProbe
 import org.apache.openwhisk.common.{AkkaLogging, Logging}
 import org.apache.openwhisk.core.containerpool._
 import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
-import org.apache.openwhisk.core.entity.DocInfo
+import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.core.scheduler.test.{LocalScheduler, TestBase}
 import org.apache.openwhisk.grpc._
 import org.scalatest.OptionValues._
@@ -35,7 +35,7 @@ class SlowNetworkMessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataS
     import org.apache.openwhisk.grpc._
 
     queueMetadataStore.getEndPoint(action) flatMap {
-      case (host, port) =>
+      case QueueRegistration(host, port) =>
         val (sendFuture, sizes) = Source
           .fromGraph(new ConflatedTickerStage)
           .throttle(1, 20 millis)

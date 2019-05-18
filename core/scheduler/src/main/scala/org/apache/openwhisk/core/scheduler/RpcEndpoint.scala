@@ -7,7 +7,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import akka.util.Timeout
 import org.apache.openwhisk.core.database.etcd._
-import org.apache.openwhisk.core.entity.DocInfo
+import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.core.scheduler.QueueManager._
 import org.apache.openwhisk.grpc._
 
@@ -26,7 +26,8 @@ class RpcEndpoint(queueManager: ActorRef, queueMetadataStore: QueueMetadataStore
     val docInfo = parseDocInfo(in.action.head)
     for {
       _ <- (queueManager ? CreateQueue(docInfo)).mapTo[QueueCreated]
-      _ <- queueMetadataStore.txnWriteEndpoint(docInfo, schedulerConfig.endpoint)
+      registration = QueueRegistration(schedulerConfig.host, schedulerConfig.port)
+      _ <- queueMetadataStore.txnWriteEndpoint(docInfo, registration)
     } yield {
       CreateQueueResponse(Some(ok), schedulerConfig.endpoint)
     }

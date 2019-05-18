@@ -3,10 +3,12 @@ package org.apache.openwhisk.core.scheduler.test
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import com.google.protobuf.ByteString
+import org.apache.openwhisk.core.entity.QueueRegistration
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
 import org.apache.openwhisk.grpc.etcd.RangeRequest
 import org.scalatest.OptionValues._
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -44,7 +46,9 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
           ByteString.copyFromUtf8(metadataStoreConfig.queueEndpointKeyTemplate.format(actionId.id, actionId.revision)))
         kvClient.range(req)
       } map { resp =>
-        resp.kvs.head.value should be(ByteString.copyFromUtf8(s"$local:$schedulerPort"))
+        val reg = QueueRegistration(local, schedulerPort)
+        val raw = reg.toJson.compactPrint
+        resp.kvs.head.value should be(ByteString.copyFromUtf8(raw))
       }
     }
   }
