@@ -5,6 +5,7 @@ import akka.actor.{Actor, ActorRef, Props}
 import akka.pattern.pipe
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.common.Logging
 import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.grpc.{ActionIdentifier, Activation, WindowAdvertisement}
 
@@ -12,10 +13,10 @@ import scala.concurrent.ExecutionContext
 
 sealed abstract class QueueOperationError
 case object QueueNotExist extends QueueOperationError
-case object Overloaded extends QueueOperationError
+case class Overloaded(limit: Int) extends QueueOperationError
 
 object QueueManager {
-  def props() = Props(new QueueManager)
+  def props(schedulerConfig: SchedulerConfig)(implicit logging: Logging) = Props(new QueueManager(schedulerConfig))
 
   final case class CreateQueue(action: DocInfo)
   final case class QueueCreated()
@@ -33,7 +34,7 @@ object QueueManager {
                                           sender: ActorRef)
 }
 
-class QueueManager extends Actor {
+class QueueManager(schedulerConfig: SchedulerConfig)(implicit logging: Logging) extends Actor {
   import QueueManager._
 
   implicit val mat: Materializer = ActorMaterializer()
@@ -44,7 +45,7 @@ class QueueManager extends Actor {
   override def receive: Receive = {
     case CreateQueue(action) =>
       if (!queues.contains(action)) {
-        val queue = context.actorOf(Queue.props(action))
+        val queue = context.actorOf(Queue.props(action, schedulerConfig))
         queues = queues + (action -> queue)
       }
       sender ! QueueCreated()

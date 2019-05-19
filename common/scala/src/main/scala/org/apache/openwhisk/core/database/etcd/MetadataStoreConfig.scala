@@ -5,4 +5,8 @@ final case class MetadataStoreConfig(queueMarkerKeyTemplate: String,
                                      schedulerEndpointKeyTemplate: String,
                                      invokerEndpointKeyTemplate: String,
                                      host: String,
-                                     port: Int)
+                                     port: Int) {
+  def schedulerEndpointPrefix: String = schedulerEndpointKeyTemplate.replaceAll("[^/]+$", "")
+
+  def invokerEndpointPrefix: String = invokerEndpointKeyTemplate.replaceAll("[^/]+$", "")
+}

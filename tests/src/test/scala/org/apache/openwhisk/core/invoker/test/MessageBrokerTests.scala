@@ -6,13 +6,14 @@ import akka.event.Logging
 import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.{Sink, Source}
 import akka.testkit.TestProbe
-import org.apache.openwhisk.common.{AkkaLogging, Logging}
+import org.apache.openwhisk.common.{AkkaLogging, Logging, TransactionId => WhiskTid}
 import org.apache.openwhisk.core.containerpool._
 import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
 import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.core.scheduler.test.{LocalScheduler, TestBase}
 import org.apache.openwhisk.grpc._
 import org.scalatest.OptionValues._
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -46,7 +47,7 @@ class SlowNetworkMessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataS
           .concat(sizes)
           .delay(20 millis, DelayOverflowStrategy.backpressure)
 
-        val client = SchedulerConnector.getClient(host, port)
+        val client = schedulerClientPool.getClient(host, port)
         val activations = client
           .fetch(source)
           .delay(20 millis, DelayOverflowStrategy.backpressure)
@@ -68,6 +69,7 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
   override def schedulerPort: Int = 8956
 
   implicit val log: Logging = new AkkaLogging(Logging.getLogger(sys, this))
+  val rpcTid = TransactionId(WhiskTid.invokerNanny.toJson.compactPrint)
 
   "Message broker" should {
     "not produce more message than demanded" in {
@@ -104,7 +106,7 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
               p <- prevF
               body = s"msg-$i"
               actionId = ActionIdentifier(action.id.asString, action.rev.asString)
-              _ <- schedulerClient.put(Activation(Some(actionId), body))
+              _ <- schedulerClient.put(Activation(Some(rpcTid), Some(actionId), body))
             } yield body :: p
         }
         .map(_.reverse)
@@ -207,7 +209,7 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
     val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
     val seed = (1 to num).toList
     Future.traverse(seed) { i =>
-      schedulerClient.put(Activation(Some(actionId))) map { resp =>
+      schedulerClient.put(Activation(Some(rpcTid), Some(actionId))) map { resp =>
         resp.status.value.statusCode should be(200)
       }
     } map (_ => ())

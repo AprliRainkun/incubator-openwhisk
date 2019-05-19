@@ -1,7 +1,8 @@
 package org.apache.openwhisk.core.scheduler
 
-import akka.actor.{Actor, ActorLogging, ActorRef, Props, Timers}
+import akka.actor.{Actor, ActorRef, Props, Timers}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.common.Logging
 import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.grpc.Activation
 
@@ -11,7 +12,8 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 object Queue {
-  def props(action: DocInfo) = Props(new Queue(action))
+  def props(action: DocInfo, schedulerConfig: SchedulerConfig)(implicit logging: Logging) =
+    Props(new Queue(action, schedulerConfig))
 
   final case class Handle(queue: ActorRef, key: Long)
   final case class CancelFetch(key: Long)
@@ -25,7 +27,7 @@ object Queue {
   private case object TTick
 }
 
-class Queue(action: DocInfo) extends Actor with Timers with ActorLogging {
+class Queue(action: DocInfo, schedulerConfig: SchedulerConfig)(implicit logging: Logging) extends Actor with Timers {
   import Queue._
   import QueueManager._
 
@@ -40,30 +42,37 @@ class Queue(action: DocInfo) extends Actor with Timers with ActorLogging {
 
   override def receive: Receive = {
     case AppendActivation(act) =>
-      queue = queue.enqueue(act)
-      sender ! Right(Unit)
-      log.debug(s"append activation to queue, new len ${queue.size}")
-      servePendingFetch()
+      if (queue.size < schedulerConfig.maxQueueLength) {
+        queue = queue.enqueue(act)
+        sender ! Right(())
+        logging.debug(this, s"append activation to queue, new len ${queue.size}")
+        servePendingFetch()
+      } else {
+        sender ! Left(Overloaded(schedulerConfig.maxQueueLength))
+        logging.debug(this, s"queue too long")
+      }
+
     case EstablishFetchStream(windows) =>
       val key = nextKey
-      log.debug(s"reactive activation flow established, key = $key")
+      logging.debug(this, s"reactive activation flow established, key = $key")
 
       val flow = ReactiveActivationFlow.create(Handle(self, key))
       val stream = windows.map(w => w.getWindowsSize).via(flow)
       sender ! Right(FetchStream(stream))
     case RequestAtMost(key, n) =>
-      log.debug(s"fetcher $key request $n")
+      logging.debug(this, s"fetcher $key request $n")
       if (queue.nonEmpty) {
         dispatchAtMostNToFetcher(n, sender, key)
       } else {
         waitingList += (key -> Registration(n, sender))
       }
     case CancelFetch(key) =>
-      log.debug(s"received cancel from fetcher $key")
+      logging.debug(this, s"received cancel from fetcher $key")
       if (waitingList.contains(key)) {
         val Registration(n, f) = waitingList(key)
         // send en empty response to allow the ask future to complete
-        log.debug(
+        logging.debug(
+          this,
           s"fetcher $key has requested $n elems previously, now send empty to allow the pending ask to complete")
         f ! Response(List.empty)
         waitingList -= key
@@ -90,7 +99,7 @@ class Queue(action: DocInfo) extends Actor with Timers with ActorLogging {
       es.append(elem)
       queue = newQueue
     }
-    log.debug(s"dispatch ${es.size} acts to fetcher $key")
+    logging.debug(this, s"dispatch ${es.size} acts to fetcher $key")
     fetcher ! Response(es.toList)
   }
 

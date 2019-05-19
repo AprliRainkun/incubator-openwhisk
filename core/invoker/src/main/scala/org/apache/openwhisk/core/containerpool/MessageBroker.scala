@@ -57,6 +57,8 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ex: ExecutionContext = context.dispatcher
 
+  protected val schedulerClientPool = new ClientPool[QueueServiceClient]
+
   startWith(InitingFlow, NoData)
 
   establishFetchFlow() map {
@@ -139,7 +141,7 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
         val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
         val source = Source(List(WindowAdvertisement(Message.Action(actionId)))).concat(sizes)
 
-        val client = SchedulerConnector.getClient(host, port)
+        val client = schedulerClientPool.getClient(host, port)
         val activations = client
           .fetch(source)
           .map(_.activation.head.body)

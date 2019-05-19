@@ -11,7 +11,7 @@ class QueueServiceDraftImpl(implicit mat: Materializer) extends QueueService {
 
   override def fetch(windows: Source[WindowAdvertisement, NotUsed]): Source[FetchActivationResponse, NotUsed] = {
     windows.map(_ => {
-      val activation = Activation(Some(ActionIdentifier("empty", "1")))
+      val activation = Activation(None, Some(ActionIdentifier("empty", "1")))
       FetchActivationResponse(Some(ok), Some(activation))
     })
   }
