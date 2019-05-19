@@ -9,6 +9,7 @@ import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.utils._
 import pureconfig._
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
@@ -48,14 +49,32 @@ object Scheduler {
       case Some(cla) => cla
       case None      => abort("Failed to parse cmd args")
     }
-    val entityStore = WhiskEntityStore.datastore()
 
+    // create database connection
+    val entityStore = WhiskEntityStore.datastore()
     val queueMetadataStore = QueueMetadataStore.connect(metadataStoreConfig)
+
+    // membership keepalive
+    val failureSeconds = loadConfigOrThrow[Int]("whisk.metadata-store.failure-seconds")
+    val membership = actorSystem.actorOf(MembershipKeepAlive.props(failureSeconds, metadataStoreConfig))
+
+    // start queue manager
     val queueManager = actorSystem.actorOf(QueueManager.props(schedulerConfig), "queue-manager")
+
+    // start invoker monitor
     val invokerResource = actorSystem.actorOf(InvokerResource.props(metadataStoreConfig))
+
+    // start rpc service
     val rpcService = new RpcEndpoint(queueManager, invokerResource, queueMetadataStore, entityStore, schedulerConfig)
     val serveFut = new QueueServiceServer(rpcService)
       .run("0.0.0.0", schedulerConfig.port)
     Await.result(serveFut, 5 seconds)
+
+    // write membership information
+    val registration = SchedulerRegistration(cmdLineArgs.id, schedulerConfig.host, schedulerConfig.port)
+    val schedulerKey = metadataStoreConfig.schedulerEndpointKeyTemplate.format(registration.instance)
+    val schedulerValue = registration.toJson.compactPrint
+    membership ! MembershipKeepAlive.SetData(schedulerKey, schedulerValue)
+
   }
 }

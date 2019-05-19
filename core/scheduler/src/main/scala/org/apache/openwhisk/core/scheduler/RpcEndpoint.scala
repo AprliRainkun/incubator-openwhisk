@@ -63,7 +63,7 @@ class RpcEndpoint(queueManager: ActorRef,
 
     (queueManager ? AppendActivation(in)).mapTo[AppendResult] map {
       case Right(_) =>
-        logging.info(this, s"Successfully appended action $docInfo")
+        logging.debug(this, s"Successfully appended action $docInfo")
         ok
       case Left(QueueNotExist) =>
         logging.error(this, s"Failed to append action $docInfo, queue doesn't exist yet")
