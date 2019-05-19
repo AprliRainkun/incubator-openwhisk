@@ -35,6 +35,7 @@ import org.apache.openwhisk.core.entity.ActivationId.ActivationIdGenerator
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.entity.types._
 import org.apache.openwhisk.core.loadBalancer.LoadBalancer
+import org.apache.openwhisk.core.loadBalancer.schedulerBalancer.SchedulerResourceActor
 import org.apache.openwhisk.core.{ConfigKeys, WhiskConfig}
 import org.apache.openwhisk.http.Messages
 import org.apache.openwhisk.spi.{Spi, SpiLoader}
@@ -159,6 +160,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
   implicit val materializer: ActorMaterializer,
   implicit val logging: Logging,
   implicit val entityStore: EntityStore,
+  implicit val schedulerResource: SchedulerResourceActor,
   implicit val entitlementProvider: EntitlementProvider,
   implicit val activationIdFactory: ActivationIdGenerator,
   implicit val loadBalancer: LoadBalancer,
@@ -238,6 +240,7 @@ class RestAPIVersion(config: WhiskConfig, apiPath: String, apiVersion: String)(
     override val activeAckTopicIndex: ControllerInstanceId,
     override val entityStore: EntityStore,
     override val activationStore: ActivationStore,
+    override val schedulerResource: SchedulerResourceActor,
     override val entitlementProvider: EntitlementProvider,
     override val activationIdFactory: ActivationIdGenerator,
     override val loadBalancer: LoadBalancer,

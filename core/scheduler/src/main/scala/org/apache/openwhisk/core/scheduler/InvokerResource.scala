@@ -55,12 +55,14 @@ class InvokerResource(config: MetadataStoreConfig)(implicit logging: Logging) ex
         invokerPools += (reg.instance -> reg.userMemory)
       }
       sender ! Status.Success(())
+      logging.info(this, s"new invoker discovered, $reg")(TransactionId.schedulerNanny)
     case InvokerOffline(instance) =>
       if (invokers.contains(instance)) {
         invokers -= instance
         invokerPools -= instance
       }
       sender ! Status.Success(())
+      logging.warn(this, s"invoker offline, instance = $instance")(TransactionId.schedulerNanny)
     case ReserveMemory(tid, memory, replica) =>
       implicit val transid: TransactionId = tid
       reserve(invokerPools, memory, replica) match {
