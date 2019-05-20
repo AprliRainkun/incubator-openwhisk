@@ -7,11 +7,12 @@ import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.containerpool._
 import org.apache.openwhisk.core.containerpool.logging.LogStoreProvider
 import org.apache.openwhisk.core.database._
-import org.apache.openwhisk.core.database.etcd.{QueueMetadataStore, QueueMetadataStoreConfig}
+import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.{ConfigKeys, WhiskConfig}
 import org.apache.openwhisk.spi.SpiLoader
 import pureconfig._
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
@@ -68,17 +69,30 @@ class InvokerPull(config: WhiskConfig,
   private val entityStore = WhiskEntityStore.datastore()
   private val activationStore =
     SpiLoader.get[ActivationStoreProvider].instance(actorSystem, mat, logging)
-  private val queueMetadataStoreConfig = loadConfigOrThrow[QueueMetadataStoreConfig](ConfigKeys.queueMetadataStore)
-  private val queueMetadataStore = QueueMetadataStore.connect(queueMetadataStoreConfig)
+  private val metadataStoreConfig = loadConfigOrThrow[MetadataStoreConfig](ConfigKeys.metadataStore)
+  private val queueMetadataStore = QueueMetadataStore.connect(metadataStoreConfig)
 
   // pool manager
   private val poolManager = actorSystem.actorOf(
     PoolManager
       .props(containerFactory.createContainer, entityStore, activationStore, poolConfig, queueMetadataStore, producer))
+
+  // membership keepalive
+  private val failureSeconds = loadConfigOrThrow[Int]("whisk.metadata-store.failure-seconds")
+  private val membership = actorSystem.actorOf(MembershipKeepAlive.props(failureSeconds, metadataStoreConfig))
+
   // setup rpc endpoint
   private val rpcImpl = new RpcEndpoint(poolManager)
+  private val host = loadConfigOrThrow[String]("whisk.invoker.grpc.host")
   private val port = loadConfigOrThrow[Int]("whisk.invoker.grpc.port")
 
+  // start rpc server
   private val serveFut = new RpcServer(rpcImpl).run("0.0.0.0", port)
   Await.result(serveFut, 3 seconds)
+
+  // write membership information
+  private val registration = InvokerRegistration(instance.instance, host, port, poolConfig.userMemory)
+  private val invokerKey = metadataStoreConfig.invokerEndpointKeyTemplate.format(registration.instance)
+  private val invokerValue = registration.toJson.compactPrint
+  membership ! MembershipKeepAlive.SetData(invokerKey, invokerValue)
 }

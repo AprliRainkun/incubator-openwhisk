@@ -2,10 +2,10 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.NotUsed
 import akka.actor.{Actor, ActorRef, Props}
-import akka.grpc.GrpcClientSettings
 import akka.pattern.pipe
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
+import org.apache.openwhisk.common.Logging
 import org.apache.openwhisk.core.entity.DocInfo
 import org.apache.openwhisk.grpc.{ActionIdentifier, Activation, WindowAdvertisement}
 
@@ -13,11 +13,10 @@ import scala.concurrent.ExecutionContext
 
 sealed abstract class QueueOperationError
 case object QueueNotExist extends QueueOperationError
-case object Overloaded extends QueueOperationError
+case class Overloaded(limit: Int) extends QueueOperationError
 
 object QueueManager {
-  def props(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) =
-    Props(new QueueManager(etcdClientConfig, schedulerConfig))
+  def props(schedulerConfig: SchedulerConfig)(implicit logging: Logging) = Props(new QueueManager(schedulerConfig))
 
   final case class CreateQueue(action: DocInfo)
   final case class QueueCreated()
@@ -35,7 +34,7 @@ object QueueManager {
                                           sender: ActorRef)
 }
 
-class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: SchedulerConfig) extends Actor {
+class QueueManager(schedulerConfig: SchedulerConfig)(implicit logging: Logging) extends Actor {
   import QueueManager._
 
   implicit val mat: Materializer = ActorMaterializer()
@@ -44,10 +43,10 @@ class QueueManager(etcdClientConfig: GrpcClientSettings, schedulerConfig: Schedu
   private var queues = Map.empty[DocInfo, ActorRef]
 
   override def receive: Receive = {
-    case CreateQueue(name) =>
-      if (!queues.contains(name)) {
-        val queue = context.actorOf(Queue.props(name))
-        queues = queues + (name -> queue)
+    case CreateQueue(action) =>
+      if (!queues.contains(action)) {
+        val queue = context.actorOf(Queue.props(action, schedulerConfig))
+        queues = queues + (action -> queue)
       }
       sender ! QueueCreated()
     case msg @ AppendActivation(act) =>

@@ -28,11 +28,11 @@ object ContainerPoolForAction {
 
   // private data
   private case class ContainerDescriptor(name: String, capacity: Int, action: WhiskAction) {
-    def changeCapacity(cap: Int) = copy(capacity = cap)
+    def changeCapacity(cap: Int): ContainerDescriptor = copy(capacity = cap)
   }
 
   // private message
-  private case class ActionDocFetched(tid: TransactionId, result: Try[WhiskAction], origin: ActorRef)
+  private case class ActionDocFetched(tid: TransactionId, result: Try[WhiskAction], origin: ActorRef, number: Int)
 }
 
 class ContainerPoolForAction(messageBroker: ActorRef,
@@ -75,23 +75,25 @@ class ContainerPoolForAction(messageBroker: ActorRef,
     // construct a runnable action by fetching code from database
     // ack immediately on failure
     // dispatch runnable action to container proxy
-    case PoolManager.AllocateContainer(tid, entity) =>
+    case PoolManager.AllocateContainer(tid, entity, number) =>
       implicit val transid: TransactionId = tid
       val origin = sender()
       WhiskAction.get(entityStore, entity.id, entity.rev, fromCache = entity.rev != DocRevision.empty) onComplete {
         result =>
-          self ! ActionDocFetched(tid, result, origin)
+          self ! ActionDocFetched(tid, result, origin, number)
       }
 
-    case ActionDocFetched(tid, result, origin) =>
+    case ActionDocFetched(tid, result, origin, number) =>
       result map { action =>
         action.toExecutableWhiskAction match {
           case Some(exe) =>
-            val name = ContainerProxy.containerName(instance, action.namespace.asString, action.name.asString)
-            val container = context.actorOf(
-              ContainerProxySlim.props(self, poolConfig, name, factory, tid, action.limits.timeout.duration, exe))
-            logContainerCreate(tid, name, action)
-            initingPool += (container -> ContainerDescriptor(name, 0, action))
+            (0 until number) foreach { _ =>
+              val name = ContainerProxy.containerName(instance, action.namespace.asString, action.name.asString)
+              val container = context.actorOf(
+                ContainerProxySlim.props(self, poolConfig, name, factory, tid, action.limits.timeout.duration, exe))
+              logContainerCreate(tid, name, action)
+              initingPool += (container -> ContainerDescriptor(name, 0, action))
+            }
             Right(())
           case None =>
             logging.error(this, s"non-executable action reached the invoker")

@@ -5,12 +5,14 @@ import akka.grpc.GrpcClientSettings
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.testkit.{TestKit, TestProbe}
+import org.apache.openwhisk.common.{AkkaLogging, Logging, TransactionId => WhiskTid}
 import org.apache.openwhisk.core.scheduler._
 import org.apache.openwhisk.grpc._
 import org.junit.runner.RunWith
 import org.scalatest.OptionValues._
 import org.scalatest.junit.JUnitRunner
 import org.scalatest.{AsyncWordSpecLike, BeforeAndAfterAll, Matchers}
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext}
@@ -27,6 +29,7 @@ class GrpcSetupTests
   implicit val sys: ActorSystem = system
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ec: ExecutionContext = system.dispatcher
+  implicit val logging: Logging = new AkkaLogging(akka.event.Logging.getLogger(sys, this))
 
   override def beforeAll(): Unit = {
     new QueueServiceServer(new QueueServiceDraftImpl()).run(local, port)
@@ -36,6 +39,7 @@ class GrpcSetupTests
     system.terminate()
   }
 
+  val tid = TransactionId(WhiskTid.schedulerStarting.toJson.compactPrint)
   val actionId = ActionIdentifier("ns/pkg/act", "1")
 
   "Queue service server" should {
@@ -58,7 +62,7 @@ class GrpcSetupTests
     }
 
     "expose its put method" in {
-      val act = Activation(Some(actionId))
+      val act = Activation(Some(tid), Some(actionId))
 
       val resp = Await.result(client.put(act), 3.seconds)
 
@@ -66,11 +70,9 @@ class GrpcSetupTests
     }
 
     "expose its create method" in {
-      val tid = TransactionId("#tid_000")
-      val act = CreateQueueRequest(Option(tid), Some(actionId))
+      val act = CreateQueueRequest(Some(tid), Some(actionId))
 
       val resp = Await.result(client.create(act), 3.seconds)
-
       resp.status.value.statusCode should be(200)
     }
   }

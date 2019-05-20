@@ -22,8 +22,9 @@ message ActionIdentifier {
 }
 
 message Activation {
-    ActionIdentifier action = 1;
-    string body = 2;
+    TransactionId tid = 1;
+    ActionIdentifier action = 2;
+    string body = 3;
 }
 
 message TransactionId {
@@ -58,5 +59,6 @@ message CreateQueueRequest {
 
 message CreateQueueResponse {
     ResponseStatus status = 1;
-    string endpoint = 2;
+    string host = 2;
+    int32 port = 3;
 }

@@ -8,6 +8,7 @@ REGISTRY="quay.io/coreos/etcd"
 docker volume create --name ${VOLUME_NAME}
 
 docker run -d \
+    --network bridge \
     -p 2379:2379 \
     -p 2380:2380 \
     --volume=${VOLUME_NAME}:/etcd-data \

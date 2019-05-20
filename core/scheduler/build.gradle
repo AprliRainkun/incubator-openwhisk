@@ -20,18 +20,22 @@ apply plugin: 'application'
 apply plugin: 'eclipse'
 apply plugin: 'maven'
 
+ext.dockerImageName = 'scheduler'
+apply from: '../../gradle/docker.gradle'
+distDocker.dependsOn ':common:scala:distDocker', 'distTar'
+
 project.archivesBaseName = "openwhisk-scheduler"
 
 repositories {
     mavenCentral()
 }
 
-configurations {
-    alpnagent
-}
+//configurations {
+//    alpnagent
+//}
 
 dependencies {
-    alpnagent 'org.mortbay.jetty.alpn:jetty-alpn-agent:2.0.9'
+    //alpnagent 'org.mortbay.jetty.alpn:jetty-alpn-agent:2.0.9'
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
     compile project (':common:scala')
 }
@@ -40,7 +44,8 @@ tasks.withType(ScalaCompile) {
     scalaCompileOptions.additionalParameters = gradle.scala.compileFlags
 }
 
-application {
-    mainClassName = "org.apache.openwhisk.core.scheduler.Scheduler"
-    applicationDefaultJvmArgs = ['-javaagent:' + configurations.alpnagent.asPath]
-}
+mainClassName = "org.apache.openwhisk.core.scheduler.Scheduler"
+//application {
+//    mainClassName = "org.apache.openwhisk.core.scheduler.Scheduler"
+//    applicationDefaultJvmArgs = ['-javaagent:' + configurations.alpnagent.asPath]
+//}

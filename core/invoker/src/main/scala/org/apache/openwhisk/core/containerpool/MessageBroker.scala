@@ -7,7 +7,7 @@ import akka.stream.scaladsl.Source
 import akka.stream.{ActorMaterializer, Materializer}
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
-import org.apache.openwhisk.core.entity.DocInfo
+import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
 
@@ -56,6 +56,8 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
 
   implicit val mat: Materializer = ActorMaterializer()
   implicit val ex: ExecutionContext = context.dispatcher
+
+  protected val schedulerClientPool = new ClientPool[QueueServiceClient]
 
   startWith(InitingFlow, NoData)
 
@@ -130,16 +132,16 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
   // override by unit tests
   protected def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
     queueMetadataStore.getEndPoint(action) flatMap {
-      case (host, port) =>
+      case QueueRegistration(host, port) =>
         val (sendFuture, sizes) = Source
           .fromGraph(new ConflatedTickerStage)
-          .throttle(1, 20 millis)
+          .throttle(1, 20.millis)
           .map(b => WindowAdvertisement(Message.WindowsSize(b)))
           .preMaterialize()
         val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
         val source = Source(List(WindowAdvertisement(Message.Action(actionId)))).concat(sizes)
 
-        val client = SchedulerConnector.getClient(host, port)
+        val client = schedulerClientPool.getClient(host, port)
         val activations = client
           .fetch(source)
           .map(_.activation.head.body)

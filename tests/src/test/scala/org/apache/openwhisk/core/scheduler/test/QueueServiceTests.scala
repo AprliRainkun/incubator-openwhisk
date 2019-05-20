@@ -3,10 +3,13 @@ package org.apache.openwhisk.core.scheduler.test
 import akka.stream.scaladsl.{Sink, Source}
 import akka.stream.testkit.scaladsl.TestSink
 import com.google.protobuf.ByteString
+import org.apache.openwhisk.common.{TransactionId => WhiskTid}
+import org.apache.openwhisk.core.entity.QueueRegistration
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
 import org.apache.openwhisk.grpc.etcd.RangeRequest
 import org.scalatest.OptionValues._
+import spray.json._
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -20,31 +23,34 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   override def etcdPort = 2379
   override def schedulerPort = 8990
 
+  val tid = TransactionId(WhiskTid.schedulerStarting.toJson.compactPrint)
+
   "Queue creation service" should {
     "be reachable" in {
-      val tid = TransactionId("#tid_000")
       val actionId = ActionIdentifier("ns/pkg/act", "1")
       val req = CreateQueueRequest(Some(tid), Some(actionId))
 
       schedulerClient.create(req) map { resp =>
         resp.status.value.statusCode should be(200)
-        resp.endpoint should be(local)
+        resp.host should be(local)
+        resp.port should be(schedulerPort)
       }
     }
 
     "create a queue and write endpoint to etcd" in {
       val actionId = ActionIdentifier("ns/pkg/act2", "1")
-      val tid = TransactionId("#tid_000")
       val req = CreateQueueRequest(Some(tid), Some(actionId))
 
       schedulerClient.create(req) flatMap { resp =>
         resp.status.value.statusCode should be(200)
 
         val req = RangeRequest(key =
-          ByteString.copyFromUtf8(queueMetadataStoreConfig.endpointKeyTemplate.format(actionId.id, actionId.revision)))
+          ByteString.copyFromUtf8(metadataStoreConfig.queueEndpointKeyTemplate.format(actionId.id, actionId.revision)))
         kvClient.range(req)
       } map { resp =>
-        resp.kvs.head.value should be(ByteString.copyFromUtf8(local))
+        val reg = QueueRegistration(local, schedulerPort)
+        val raw = reg.toJson.compactPrint
+        resp.kvs.head.value should be(ByteString.copyFromUtf8(raw))
       }
     }
   }
@@ -217,13 +223,12 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   }
 
   private def createQueue(actionId: ActionIdentifier): Future[CreateQueueResponse] = {
-    val tid = TransactionId("#tid_000")
     val req = CreateQueueRequest(Some(tid), Some(actionId))
     schedulerClient.create(req)
   }
 
   private def seedNPuts(actionId: ActionIdentifier, num: Int): Future[Unit] = {
     val seed = (1 to num).toList
-    Future.traverse(seed)(_ => schedulerClient.put(Activation(Some(actionId)))) map (_ => ())
+    Future.traverse(seed)(_ => schedulerClient.put(Activation(Some(tid), Some(actionId)))) map (_ => ())
   }
 }

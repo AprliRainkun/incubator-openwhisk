@@ -23,7 +23,7 @@ class RpcEndpoint(poolManager: ActorRef)(implicit mat: Materializer, ex: Executi
 
     val tid = common.TransactionId.serdes.read(in.tid.head.raw.parseJson)
     val actionId = DocInfo ! (in.action.head.id, in.action.head.revision)
-    (poolManager ? PoolManager.AllocateContainer(tid, actionId)).mapTo[PoolManager.ContainerOperationResult] map {
+    (poolManager ? PoolManager.AllocateContainer(tid, actionId, in.number)).mapTo[PoolManager.ContainerOperationResult] map {
       case Right(_)     => ResponseStatus(200, "success")
       case Left(reason) => ResponseStatus(500, reason.msg)
     } map (r => AllocateResponse(Some(r)))

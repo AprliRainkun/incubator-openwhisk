@@ -214,6 +214,9 @@ object TransactionId {
 
   val systemPrefix = "sid_"
 
+  val schedulerStarting = TransactionId(systemPrefix + "schedulerStarting")
+  val schedulerNanny = TransactionId(systemPrefix + "schedulerNanny")
+
   val unknown = TransactionId(systemPrefix + "unknown")
   val testing = TransactionId(systemPrefix + "testing") // Common id for for unit testing
   val invoker = TransactionId(systemPrefix + "invoker") // Invoker startup/shutdown or GC activity

@@ -16,7 +16,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final case class ContainerOperationError(msg: String)
 
 object PoolManager {
-  final case class AllocateContainer(tid: TransactionId, actionEntity: DocInfo)
+  final case class AllocateContainer(tid: TransactionId, actionEntity: DocInfo, number: Int)
   type ContainerOperationResult = Either[ContainerOperationError, Unit]
 
   def props(factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
@@ -48,7 +48,7 @@ class PoolManager(factory: (TransactionId, String, ImageName, Boolean, ByteSize,
   private var pools = Map.empty[DocInfo, ActorRef]
 
   override def receive: Receive = {
-    case command @ AllocateContainer(_, entity) =>
+    case command @ AllocateContainer(_, entity, _) =>
       if (!pools.contains(entity)) {
         val messageBroker = sys.actorOf(MessageBroker.props(entity, 5, queueMetadataStore))
         val pool =

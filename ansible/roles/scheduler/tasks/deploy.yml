@@ -1,0 +1,103 @@
+# This role installs schedulers.
+
+- import_tasks: docker_login.yml
+
+- name: get scheduler name and index
+  set_fact:
+    scheduler_name: "{{ name_prefix ~ ((scheduler_index_base | int) + host_group.index(inventory_hostname)) }}"
+    scheduler_index: "{{ (scheduler_index_base | int) + host_group.index(inventory_hostname) }}"
+
+- name: "pull scheduler image with tag {{ docker.image.tag }}"
+  shell: "docker pull {{ docker_registry }}{{ docker.image.prefix }}/invoker:{{ docker.image.tag }}"
+  when: docker_registry != ""
+  register: result
+  until: (result.rc == 0)
+  retries: "{{ docker.pull.retries }}"
+  delay: "{{ docker.pull.delay }}"
+
+- name: ensure scheduler log directory is created with permissions
+  file:
+    path: "{{ whisk_log_dir }}/{{ scheduler_name }}"
+    state: directory
+    mode: 0777
+  become: "{{ logs.dir.become }}"
+
+- name: ensure scheduler config directory is created with permissions
+  file:
+    path: "{{ scheduler.confdir }}/{{ scheduler_name }}"
+    state: directory
+    mode: 0777
+  become: "{{ scheduler.dir.become }}"
+
+- name: prepare scheduler ports
+  set_fact:
+    scheduler_ports_to_expose: ["{{ scheduler.port + (scheduler_index | int) }}:8080"]
+
+- name: expose grpc service port
+  set_fact:
+    scheduler_grpc_port: "{{ scheduler.grpc.port + (scheduler_index | int) }}"
+    scheduler_ports_to_expose: "{{ scheduler_ports_to_expose }} + [ \"{{ scheduler_grpc_port }}:{{ scheduler_grpc_port }}\" ]"
+
+- name: load config from template
+  set_fact:
+    openwhisk_config: "{{ lookup('template', 'config.j2') | b64encode }}"
+
+- name: populate environment variables for scheduler
+  set_fact:
+    env:
+      "JAVA_OPTS": "-Xmx{{ scheduler.heap }} -XX:+CrashOnOutOfMemoryError -XX:+UseGCOverheadLimit -XX:ErrorFile=/logs/java_error.log"
+      "INVOKER_OPTS": "{{ scheduler_args | default(scheduler.arguments) }}"
+      "OPENWHISK_ENCODED_CONFIG": "{{ openwhisk_config }}"
+      "PORT": "8080"
+      "TZ": "{{ docker.timezone }}"
+      "CONFIG_whisk_metadataStore_host": "{{ etcd.host }}"
+      "CONFIG_whisk_metadataStore_port": "{{ etcd.port }}"
+      "CONFIG_whisk_scheduler_host": "{{ inventory_hostname }}"
+      "CONFIG_whisk_scheduler_port": "{{ scheduler_grpc_port }}"
+      "CONFIG_whisk_scheduler_actionContainerReserve": "{{ scheduler.actionContainerReserve }}"
+      "CONFIG_whisk_scheduler_maxQueueLength": "{{ scheduler.maxQueueLength }}"
+      "METRICS_KAMON": "{{ metrics.kamon.enabled | default(false) | string }}"
+      "METRICS_KAMON_TAGS": "{{ metrics.kamon.tags | default() | string }}"
+      "METRICS_LOG": "{{ metrics.log.enabled | default(false) | string }}"
+      "CONFIG_kamon_statsd_hostname": "{{ metrics.kamon.host }}"
+      "CONFIG_kamon_statsd_port": "{{ metrics.kamon.port }}"
+
+- name: merge extra env variables
+  set_fact:
+    env: "{{ env | combine(scheduler.extraEnv) }}"
+
+- name: populate volumes for scheduler
+  set_fact:
+    scheduler_volumes:
+      - "{{ whisk_logs_dir }}/{{ scheduler_name }}:/logs"
+      - "{{ scheduler.confdir }}/{{ scheduler_name }}:/conf"
+
+- name: (re)start schduler
+  docker_container:
+    name: "{{ scheduler_name }}"
+    iamge:
+      "{{ docker_registry ~ docker.image.prefix }}/scheduler:{{ docker.image.tag }}"
+    state: started
+    recreate: true
+    restart_policy: "{{ docker.restart.policy }}"
+    hostname: "{{ scheduler_name }}"
+    env: "{{ env }}"
+    volumes: "{{ scheduler_volumes }}"
+    ports: "{{ scheduler_ports_to_expose }}"
+    userns_mode: "{{ userns_mode | default('') }}"
+    pid_mode: "{{ pid_mode | default('') }}"
+    privileged: "{{ privileged | default('no') }}"
+    command:
+        /bin/sh -c
+        "exec /init.sh --id {{ scheduler_index }}
+        >> /logs/{{ scheduler_name }}_logs.log 2>&1"
+
+- name: wait until the scheduler in this host is up and running
+  uri:
+    url:
+      "http://{{ansible_host}}:{{scheduler_port}}/ping"
+    validate_certs: "no"
+  register: result
+  until: result.status == 200
+  retries: 12
+  delay: 5
