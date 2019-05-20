@@ -33,6 +33,8 @@ class RouterBalancer(config: WhiskConfig,
 
   private val placeholder = InvokerInstanceId(0, None, None, ByteSize.fromString("256GB"))
 
+  logging.info(this, "start router balancer")
+
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
     // first check the existence of the action queue, get scheduler endpoint
@@ -78,6 +80,5 @@ object RouterBalancer extends LoadBalancerProvider {
     mat: ActorMaterializer): LoadBalancer =
     new RouterBalancer(whiskConfig, createFeedFactory(whiskConfig, instance), instance)
 
-  override def requiredProperties: Map[String, String] =
-    ExecManifest.requiredProperties ++ WhiskConfig.wskApiHost
+  override def requiredProperties: Map[String, String] = WhiskConfig.kafkaHosts
 }

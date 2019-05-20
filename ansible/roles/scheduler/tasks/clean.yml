@@ -2,7 +2,7 @@
 
 - name: get scheduler name
   set_fact:
-    scheduler_name: "{{ name_prefix ~ host_group.index(inventory_name) }}"
+    scheduler_name: "{{ name_prefix ~ host_group.index(inventory_hostname) }}"
 
 - name: remove scheduler
   docker_container:
