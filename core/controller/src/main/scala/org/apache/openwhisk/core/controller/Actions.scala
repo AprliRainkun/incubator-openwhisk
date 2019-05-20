@@ -17,39 +17,37 @@
 
 package org.apache.openwhisk.core.controller
 
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scala.util.{Failure, Success, Try}
-import org.apache.kafka.common.errors.RecordTooLargeException
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.{ActorSystem, Props}
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.model.HttpMethod
 import akka.http.scaladsl.model.StatusCodes._
-import akka.http.scaladsl.server.RequestContext
-import akka.http.scaladsl.server.RouteResult
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import akka.http.scaladsl.server.{RequestContext, RouteResult}
 import akka.http.scaladsl.unmarshalling._
 import akka.pattern.ask
 import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
-import spray.json._
-import spray.json.DefaultJsonProtocol._
+import org.apache.kafka.common.errors.RecordTooLargeException
 import org.apache.openwhisk.common.TransactionId
-import org.apache.openwhisk.core.{FeatureFlags, WhiskConfig}
 import org.apache.openwhisk.core.controller.RestApiCommons.{ListLimit, ListSkip}
 import org.apache.openwhisk.core.controller.actions.PostActionActivation
 import org.apache.openwhisk.core.database.{ActivationStore, CacheChangeNotification, NoDocumentException}
-import org.apache.openwhisk.core.entitlement._
+import org.apache.openwhisk.core.entitlement.{Collection, Resource, _}
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.entity.types.EntityStore
+import org.apache.openwhisk.core.loadBalancer.LoadBalancerException
+import org.apache.openwhisk.core.loadBalancer.schedulerBalancer._
+import org.apache.openwhisk.core.{FeatureFlags, WhiskConfig}
+import org.apache.openwhisk.grpc.{TransactionId => RpcTid, _}
 import org.apache.openwhisk.http.ErrorResponse.terminate
 import org.apache.openwhisk.http.Messages
 import org.apache.openwhisk.http.Messages._
-import org.apache.openwhisk.core.entitlement.Resource
-import org.apache.openwhisk.core.entitlement.Collection
-import org.apache.openwhisk.core.loadBalancer.LoadBalancerException
-import org.apache.openwhisk.core.loadBalancer.schedulerBalancer.{SchedulerResource, SchedulerResourceActor}
-import org.apache.openwhisk.grpc.{TransactionId => RpcTid, _}
+import spray.json.DefaultJsonProtocol._
+import spray.json._
+
+import scala.concurrent.Future
+import scala.concurrent.duration._
+import scala.language.postfixOps
+import scala.util.{Failure, Success, Try}
 
 /**
  * A singleton object which defines the properties that must be present in a configuration
@@ -116,7 +114,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
   protected val activationStore: ActivationStore
 
   /** An actor that handle queue creation on schedulers */
-  protected val schedulerResource: SchedulerResourceActor
+  protected val schedulerResource: SchedulerResourceActor = SchedulerResourceActor(actorSystem.actorOf(Props.empty))
 
   /** Entity normalizer to JSON object. */
   import RestApiCommons.emptyEntityToJsObject
@@ -232,19 +230,15 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
 
         onComplete(checkAdditionalPrivileges) {
           case Success(_) =>
-            putEntity(
-              WhiskAction, entityStore, entityName.toDocId, overwrite,
-              update(user, request) _,
-              () => {
-                make(user, entityName, request)
-              },
-              postProcess = Some { action: WhiskAction =>
-                val createQueue = createQueueOnScheduler(action)
-                onComplete(createQueue) {
-                  case Success(_) => complete(OK, action)
-                  case Failure(t) => terminate(InternalServerError, t.getMessage)
-                }
-              })
+            putEntity(WhiskAction, entityStore, entityName.toDocId, overwrite, update(user, request) _, () => {
+              make(user, entityName, request)
+            }, postProcess = Some { action: WhiskAction =>
+              val createQueue = createQueueOnScheduler(action)
+              onComplete(createQueue) {
+                case Success(_) => complete(OK, action)
+                case Failure(t) => terminate(InternalServerError, t.getMessage)
+              }
+            })
           case Failure(f) =>
             super.handleEntitlementFailure(f)
         }

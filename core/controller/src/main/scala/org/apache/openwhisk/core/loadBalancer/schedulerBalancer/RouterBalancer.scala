@@ -10,7 +10,7 @@ import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.loadBalancer._
 import org.apache.openwhisk.core.{ConfigKeys, WhiskConfig}
-import org.apache.openwhisk.grpc.{TransactionId => RpcTid, _}
+import org.apache.openwhisk.grpc.{TransactionId => RpcTid, Activation => RpcActivation, _}
 import org.apache.openwhisk.spi.SpiLoader
 import pureconfig._
 import spray.json._
@@ -46,7 +46,7 @@ class RouterBalancer(config: WhiskConfig,
       resultFuture = setupActivation(msg, action, placeholder)
       rpcTid = RpcTid(transid.toJson.compactPrint)
       actionId = ActionIdentifier(actionInfo.id.asString, actionInfo.rev.asString)
-      req = Activation(Some(rpcTid), Some(actionId), msg.toJson.compactPrint)
+      req = RpcActivation(Some(rpcTid), Some(actionId), msg.toJson.compactPrint)
       _ <- client.put(req) transform {
         case Success(resp) =>
           val status = resp.status.head

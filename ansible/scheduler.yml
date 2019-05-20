@@ -1,0 +1,10 @@
+# This playbook deploys Openwhisk Schedulers.
+
+- hosts: schedulers
+  vars:
+    host_group: "{{ groups['schedulers'] }}"
+    name_prefix: "scheduler"
+    scheduler_index_base: 0
+
+  roles:
+    - scheduler

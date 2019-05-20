@@ -168,6 +168,12 @@ invokerHostname: "{{ invokerHostnameFromMap | default(inventory_hostname) }}"
 # Moved here to avoid recursions. Please do not use outside of invoker-dict.
 __invoker_ssl_keyPrefix: "invoker-"
 
+scheduler:
+  dir:
+    become: "{{ scheduler_dir_become | default(false) }}"
+  confdir: "{{ config_root_dir }}/scheduler"
+  heap: "{{ scheduler_heap | default('2g') }}"
+
 invoker:
   dir:
     become: "{{ invoker_dir_become | default(false) }}"
@@ -271,7 +277,7 @@ redis:
 
 etcd:
   host: "{{ groups['etcd']|first }}"
-  port: "{{ etcd_host | default(2379) }}"
+  port: "{{ etcd_port | default(2379) }}"
 
 linux:
   version: 4.4.0-31

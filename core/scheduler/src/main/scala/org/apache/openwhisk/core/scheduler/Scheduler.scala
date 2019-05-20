@@ -7,6 +7,7 @@ import org.apache.openwhisk.common._
 import org.apache.openwhisk.core._
 import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.entity._
+import org.apache.openwhisk.http.{BasicHttpService, BasicRasService}
 import org.apache.openwhisk.utils._
 import pureconfig._
 import spray.json._
@@ -76,5 +77,8 @@ object Scheduler {
     val schedulerValue = registration.toJson.compactPrint
     membership ! MembershipKeepAlive.SetData(schedulerKey, schedulerValue)
 
+    // setup http service, expose ping method
+    val basicPingService = new BasicRasService {}
+    BasicHttpService.startHttpService(basicPingService.route, 8080, None)
   }
 }
