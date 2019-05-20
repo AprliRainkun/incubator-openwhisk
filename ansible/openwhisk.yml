@@ -10,7 +10,7 @@
 - import_playbook: kafka.yml
   when: not lean
 
-# - import_playbook: controller.yml
+- import_playbook: controller.yml
 
 - import_playbook: scheduler.yml
 
