@@ -49,7 +49,7 @@ gradle.ext.scoverage = [
     ]
 ]
 
-gradle.ext.akka = [version : '2.5.22']
+gradle.ext.akka = [version : '2.5.20']
 gradle.ext.akka_http = [version : '10.1.8']
 
 gradle.ext.curator = [version:'4.0.0']
