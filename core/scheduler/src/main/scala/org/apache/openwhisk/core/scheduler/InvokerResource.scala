@@ -19,7 +19,7 @@ object InvokerResource {
   final case class ReserveMemory(tid: TransactionId, memory: ByteSize, replica: Int)
 
   final case class Reservation(invoker: InvokerRegistration, replica: Int)
-  final case class ReserveMemoryResult(result: Either[String, Seq[Reservation]])
+  final case class  ReserveMemoryResult(result: Either[String, Seq[Reservation]])
 
   // private messages
   private case class NewInvoker(registration: InvokerRegistration)

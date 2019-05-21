@@ -55,6 +55,7 @@ class PoolManager(factory: (TransactionId, String, ImageName, Boolean, ByteSize,
           sys.actorOf(
             ContainerPoolForAction.props(messageBroker, factory, entityStore, activationStore, poolConfig, producer))
         pools += (entity -> pool)
+        logging.info(this, s"pool and message broker created for action $entity")
       }
       pools(entity) forward command
   }

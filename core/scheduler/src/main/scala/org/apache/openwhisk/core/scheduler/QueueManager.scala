@@ -62,6 +62,7 @@ class QueueManager(schedulerConfig: SchedulerConfig)(implicit logging: Logging) 
         case (first, remaining) =>
           // todo: warn when actionName is absent (default to "")
           val action = parseDocInfo(first.head.getAction)
+          logging.info(this, s"the requested stream is for action $action")
           ActionNameDiscovered(action, remaining, requester)
       } pipeTo self
     case ActionNameDiscovered(action, windows, requester) =>

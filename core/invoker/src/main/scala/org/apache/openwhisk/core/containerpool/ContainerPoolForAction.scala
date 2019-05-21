@@ -58,6 +58,8 @@ class ContainerPoolForAction(messageBroker: ActorRef,
     case MessageBroker.NewMessage(msg) =>
       // parse data
       ActivationMessage.parse(msg).map { parsed =>
+        implicit val tid: TransactionId = parsed.transid
+        logging.info(this, s"activation message arrived at pool")
         val (container, d @ ContainerDescriptor(_, cap, _)) = freePool.head
         container ! ContainerProxySlim.Start(parsed)
         if (cap > 1) {

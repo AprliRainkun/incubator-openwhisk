@@ -233,7 +233,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
             putEntity(WhiskAction, entityStore, entityName.toDocId, overwrite, update(user, request) _, () => {
               make(user, entityName, request)
             }, postProcess = Some { action: WhiskAction =>
-              val createQueue = createQueueOnScheduler(action)
+              val createQueue = createQueueOnScheduler(action.docid)
               onComplete(createQueue) {
                 case Success(_) => complete(OK, action)
                 case Failure(t) => terminate(InternalServerError, t.getMessage)
@@ -728,30 +728,40 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
     }
   }
 
-  private def createQueueOnScheduler(action: WhiskAction)(implicit tid: TransactionId): Future[Unit] = {
+  private def createQueueOnScheduler(action: DocId)(implicit tid: TransactionId): Future[Unit] = {
     import SchedulerResource._
     implicit val timeout: Timeout = Timeout(2 seconds)
     implicit val mat: Materializer = ActorMaterializer()
 
-    val actionInfo = action.docinfo
+    logging.info(this, s"start creating queue on scheduler, action = $action")
 
-    (schedulerResource.actor ? CreateQueue(tid, actionInfo))
-      .mapTo[CreateQueueResult] flatMap {
+    val future = for {
+      // get newest revision
+      metadata <- WhiskActionMetaData.get(entityStore, action)
+      actionInfo = metadata.docinfo
+      _ = logging.info(this, s"full docInfo = $actionInfo")
+      SchedulerRegistration(_, host, port) <- (schedulerResource.actor ? CreateQueue(tid, actionInfo))
+        .mapTo[CreateQueueResult] flatMap {
+        case CreateQueueResult(Right(s))  => Future successful s
+        case CreateQueueResult(Left(msg)) => Future failed new IllegalStateException(msg)
+      }
+      client = schedulerClientPool.getClient(host, port)
+      rpcTid = RpcTid(tid.toJson.compactPrint)
+      actionId = ActionIdentifier(actionInfo.id.asString, actionInfo.rev.asString)
+      memory = s"${metadata.limits.memory.megabytes} MB"
+      req = CreateQueueRequest(Some(rpcTid), Some(actionId), memory)
+      _ <- client.create(req) flatMap { resp =>
+        val status = resp.status.head
+        if (status.statusCode == 200) Future.successful(())
+        else Future failed new IllegalStateException(status.message)
+      }
+    } yield ()
 
-      case CreateQueueResult(Right(s))  => Future successful s
-      case CreateQueueResult(Left(msg)) => Future failed new IllegalStateException(msg)
-    } flatMap {
-      case SchedulerRegistration(_, host, port) =>
-        val client = schedulerClientPool.getClient(host, port)
-        val rpcTid = RpcTid(tid.toJson.compactPrint)
-        val actionId = ActionIdentifier(actionInfo.id.asString, actionInfo.rev.asString)
-        val req = CreateQueueRequest(Some(rpcTid), Some(actionId))
-        client.create(req) flatMap { resp =>
-          val status = resp.status.head
-          if (status.statusCode == 200) Future successful (())
-          else Future failed new IllegalStateException(status.message)
-        }
-    } map (_ => ())
+    future andThen {
+      case Failure(t) =>
+        logging.error(this, s"failed to send create request to ${t.getMessage}")
+      case _ =>
+    }
   }
 
   private val schedulerClientPool = new ClientPool[QueueServiceClient]
