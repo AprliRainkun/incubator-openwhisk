@@ -746,7 +746,11 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
         val rpcTid = RpcTid(tid.toJson.compactPrint)
         val actionId = ActionIdentifier(actionInfo.id.asString, actionInfo.rev.asString)
         val req = CreateQueueRequest(Some(rpcTid), Some(actionId))
-        client.create(req)
+        client.create(req) flatMap { resp =>
+          val status = resp.status.head
+          if (status.statusCode == 200) Future successful (())
+          else Future failed new IllegalStateException(status.message)
+        }
     } map (_ => ())
   }
 

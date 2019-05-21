@@ -31,7 +31,7 @@ class RouterBalancer(config: WhiskConfig,
   private val queueMetadataStore = QueueMetadataStore.connect(metadataStoreConfig)
   private val schedulerClientPool = new ClientPool[QueueServiceClient]
 
-  private val placeholder = InvokerInstanceId(0, None, None, ByteSize.fromString("256GB"))
+  private val placeholder = InvokerInstanceId(0, None, None, ByteSize.fromString(s"${256 * 1024} MB"))
 
   logging.info(this, "start router balancer")
 

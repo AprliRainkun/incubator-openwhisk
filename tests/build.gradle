@@ -121,7 +121,7 @@ ext.testSets = [
     ],
     "ETCD_CLIENT_ONLY": [
         "includes": [
-            "org/apache/openwhisk/common/EtcdClientTests*",
+            "org/apache/openwhisk/core/database/etcd/tests/**",
         ]
     ]
 ]
@@ -189,7 +189,7 @@ task testUnit(type: Test) {
     exclude couchDbExcludes
 }
 
-task testEtcdClient(type: Test) {
+task testEtcd(type: Test) {
     include getPattern("ETCD_CLIENT_ONLY", "includes")
 }
 

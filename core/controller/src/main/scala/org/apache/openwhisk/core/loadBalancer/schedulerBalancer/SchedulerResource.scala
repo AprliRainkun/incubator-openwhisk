@@ -2,6 +2,7 @@ package org.apache.openwhisk.core.loadBalancer.schedulerBalancer
 
 import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
 import akka.stream.{ActorMaterializer, Materializer}
+import akka.stream.scaladsl.Sink
 import akka.util.Timeout
 import org.apache.openwhisk.common.{Logging, TransactionId}
 import org.apache.openwhisk.core.database.etcd._
@@ -39,7 +40,10 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
   implicit val timeout: Timeout = Timeout(10 seconds)
   private val watcher = new MembershipWatcher(config)
 
-  watcher.watchMembership(config.schedulerEndpointPrefix) map {
+  private val watchPrefix = config.schedulerEndpointPrefix
+  logging.info(this, s"start watching scheduler membership, etcd prefix = $watchPrefix")
+
+  watcher.watchMembership(watchPrefix) map {
     case MembershipEvent.Put(_, value) =>
       val reg = value.parseJson.convertTo[SchedulerRegistration]
       NewScheduler(reg)
@@ -47,7 +51,7 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
       val pattern = "(\\d+)$".r
       val pattern(instance) = key
       SchedulerOffline(instance.toInt)
-  } ask self
+  } ask self runWith Sink.ignore
 
   override def receive: Receive = {
     case NewScheduler(reg) =>
@@ -56,6 +60,7 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
       }
       schedulers += (reg.instance -> reg)
       sender ! Status.Success(())
+      logging.info(this, s"new scheduler discovered, reg: $reg")(TransactionId.loadbalancer)
     case SchedulerOffline(instance) =>
       if (schedulers.contains(instance)) {
         schedulers -= instance
