@@ -47,7 +47,7 @@ class PoolManager(factory: (TransactionId, String, ImageName, Boolean, ByteSize,
   implicit val ex: ExecutionContext = sys.dispatcher
 
   private var pools = Map.empty[DocInfo, ActorRef]
-  private val bufferLimit = loadConfigOrThrow[Int]("whisk.scheduler.buffer-limit")
+  private val bufferLimit = loadConfigOrThrow[Int]("whisk.invoker.buffer-limit")
 
   override def receive: Receive = {
     case command @ AllocateContainer(_, entity, _) =>

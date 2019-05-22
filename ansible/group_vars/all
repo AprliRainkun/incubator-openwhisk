@@ -181,7 +181,6 @@ scheduler:
   actionContainerReserve: 1
   maxQueueLength: 20
   windowsThrottleMillis: 20
-  bufferLimit: 5
 
 invoker:
   dir:
@@ -190,6 +189,7 @@ invoker:
   port: 12001
   grpc:
     port: 13001
+  bufferLimit: 5
   heap: "{{ invoker_heap | default('2g') }}"
   arguments: "{{ invoker_arguments | default('') }}"
   userMemory: "{{ invoker_user_memory | default('2048m') }}"

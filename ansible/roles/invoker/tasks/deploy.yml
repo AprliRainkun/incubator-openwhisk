@@ -229,6 +229,8 @@
       "CONFIG_whisk_metadataStore_port": "{{ etcd.port }}"
       "CONFIG_whisk_invoker_grpc_host": "{{ ansible_host }}"
       "CONFIG_whisk_invoker_grpc_port": "{{ invoker_grpc_port }}"
+      "CONFIG_whisk_invoker_bufferLimit":
+        "{{ invoker_buffer_limit | default(invoker.bufferLimit) }}"
       "DB_WHISK_ACTIONS": "{{ db.whisk.actions }}"
       "DB_WHISK_ACTIVATIONS": "{{ db.whisk.activations }}"
       "DB_WHISK_AUTHS": "{{ db.whisk.auth }}"
