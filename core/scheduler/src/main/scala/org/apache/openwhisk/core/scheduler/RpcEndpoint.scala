@@ -37,12 +37,16 @@ class RpcEndpoint(queueManager: ActorRef,
     implicit val timeout: Timeout = Timeout(5 second)
     implicit val tid: TransactionId = parseTid(in.tid.head)
     val docInfo = parseDocInfo(in.action.head)
+    val memory = ByteSize.fromString(in.memory)
 
+    logging.info(this, s"start creating queue for action $docInfo, memory claim = ${memory.toMB}MB")
     val responseFuture = for {
-      _ <- createInitialContainers(docInfo)
+      // order matters
+      assignment <- createContainerAssignment(docInfo, memory)
       _ <- (queueManager ? CreateQueue(docInfo)).mapTo[QueueCreated]
       registration = QueueRegistration(schedulerConfig.host, schedulerConfig.port)
       _ <- queueMetadataStore.txnWriteEndpoint(docInfo, registration)
+      _ <- allocateContainerOn(docInfo, assignment)
     } yield {
       CreateQueueResponse(Some(ok), schedulerConfig.host, schedulerConfig.port)
     }
@@ -63,7 +67,7 @@ class RpcEndpoint(queueManager: ActorRef,
 
     (queueManager ? AppendActivation(in)).mapTo[AppendResult] map {
       case Right(_) =>
-        logging.debug(this, s"Successfully appended action $docInfo")
+        logging.info(this, s"Successfully appended action $docInfo")
         ok
       case Left(QueueNotExist) =>
         logging.error(this, s"Failed to append action $docInfo, queue doesn't exist yet")
@@ -76,38 +80,34 @@ class RpcEndpoint(queueManager: ActorRef,
 
   override def fetch(windows: Source[WindowAdvertisement, NotUsed]): Source[FetchActivationResponse, NotUsed] = {
     implicit val timeout: Timeout = Timeout(5 seconds)
-
+    logging.info(this, "establishing fetch stream request received")
     val fut = (queueManager ? EstablishFetchStream(windows)).mapTo[EstablishResult] map {
       case Right(FetchStream(acts)) =>
+        logging.info(this, "fetch stream established")
         acts.map { act =>
           FetchActivationResponse(Some(ok), Some(act))
         }
-      case Left(QueueNotExist) => Source(List(FetchActivationResponse(Some(notFound))))
-      case _                   => ???
+      case Left(QueueNotExist) =>
+        logging.error(this, s"queue not found")
+        Source(List(FetchActivationResponse(Some(notFound))))
+      case _ => ???
     }
     Source.fromFuture(fut) flatMapConcat identity
   }
 
-  private def createInitialContainers(actionInfo: DocInfo)(implicit tid: TransactionId): Future[Unit] = {
+  private def createContainerAssignment(actionInfo: DocInfo, memory: ByteSize)(
+    implicit tid: TransactionId): Future[Seq[Reservation]] = {
     if (schedulerConfig.actionContainerReserve > 0) {
       implicit val timeout: Timeout = Timeout(5 second)
-      for {
-        action <- WhiskAction.get(
-          entityStore,
-          actionInfo.id,
-          actionInfo.rev,
-          fromCache = actionInfo.rev != DocRevision.empty)
-        actionMem = ByteSize.fromString(s"${action.limits.memory.megabytes}MB")
-        initContainers <- (invokerResource ? ReserveMemory(tid, actionMem, schedulerConfig.actionContainerReserve))
-          .mapTo[ReserveMemoryResult]
-          .map(_.result) flatMap {
-          case Right(allocations) => Future.successful(allocations)
-          case Left(msg)          => Future.failed(InsufficientMemoryException(msg))
-        }
-        _ <- allocateContainerOn(actionInfo, initContainers)
-      } yield ()
+
+      (invokerResource ? ReserveMemory(tid, memory, schedulerConfig.actionContainerReserve))
+        .mapTo[ReserveMemoryResult]
+        .map(_.result) flatMap {
+        case Right(allocations) => Future successful allocations
+        case Left(msg)          => Future failed InsufficientMemoryException(msg)
+      }
     } else {
-      Future.successful(())
+      Future successful Seq.empty
     }
   }
 

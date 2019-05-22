@@ -60,16 +60,21 @@ class ContainerProxySlim(pool: ActorRef,
     } pipeTo self
 
   override def receive: Receive = {
-    case InitResult(result) =>
-      result foreach { container =>
-        context.become(initialized(container))
+    case r @ InitResult(inner) =>
+      inner match {
+        case Right(container) =>
+          context.become(initialized(container))
+          logging.info(this, s"container init finished, signal action pool")(TransactionId.invokerNanny)
+        case Left(msg) =>
+          logging.error(this, s"failed to init container, $msg")
       }
-      pool ! result
+      pool ! r
   }
 
   private def initialized(container: Container): Receive = {
     case Start(msg) =>
       implicit val tid: TransactionId = msg.transid
+      logging.info(this, s"start executing action in container")
       run(container, action, msg) map { result =>
         Done(msg, result)
       } pipeTo pool

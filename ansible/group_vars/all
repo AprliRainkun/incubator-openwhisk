@@ -169,10 +169,17 @@ invokerHostname: "{{ invokerHostnameFromMap | default(inventory_hostname) }}"
 __invoker_ssl_keyPrefix: "invoker-"
 
 scheduler:
+  port: 21000
   dir:
     become: "{{ scheduler_dir_become | default(false) }}"
+  grpc:
+    port: 22000
   confdir: "{{ config_root_dir }}/scheduler"
   heap: "{{ scheduler_heap | default('2g') }}"
+  arguments: "{{ scheduler_arguments | default('') }}"
+  extraEnv: "{{ scheduler_extraEnv | default({}) }}"
+  actionContainerReserve: 1
+  maxQueueLength: 20
 
 invoker:
   dir:

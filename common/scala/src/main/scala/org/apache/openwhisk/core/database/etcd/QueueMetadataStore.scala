@@ -40,7 +40,7 @@ class QueueMetadataStore(config: MetadataStoreConfig, kvClient: KVClient) {
     val req = RangeRequest(key = ByteString.copyFromUtf8(key))
     kvClient.range(req) flatMap { resp =>
       if (resp.count < 1) {
-        Future.failed(new NoSuchElementException(s"queue endpoint for action ${action.toString} doesn't exist in etcd"))
+        Future.failed(new NoSuchElementException(s"key $key doesn't exist in etcd"))
       } else {
         val raw = resp.kvs.head.value.toStringUtf8
         val reg = raw.parseJson.convertTo[QueueRegistration]

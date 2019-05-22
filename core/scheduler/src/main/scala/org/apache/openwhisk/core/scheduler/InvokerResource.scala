@@ -2,6 +2,7 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.actor.{Actor, ActorSystem, Props, Status}
 import akka.stream.{ActorMaterializer, Materializer}
+import akka.stream.scaladsl.Sink
 import akka.util.Timeout
 import org.apache.openwhisk.common.{Logging, TransactionId}
 import org.apache.openwhisk.core.database.etcd._
@@ -18,7 +19,7 @@ object InvokerResource {
   final case class ReserveMemory(tid: TransactionId, memory: ByteSize, replica: Int)
 
   final case class Reservation(invoker: InvokerRegistration, replica: Int)
-  final case class ReserveMemoryResult(result: Either[String, Seq[Reservation]])
+  final case class  ReserveMemoryResult(result: Either[String, Seq[Reservation]])
 
   // private messages
   private case class NewInvoker(registration: InvokerRegistration)
@@ -38,7 +39,10 @@ class InvokerResource(config: MetadataStoreConfig)(implicit logging: Logging) ex
   implicit val timeout: Timeout = Timeout(10 seconds)
   private val watcher = new MembershipWatcher(config)
 
-  watcher.watchMembership(config.invokerEndpointPrefix) map {
+  private val watchPrefix = config.invokerEndpointPrefix
+  logging.info(this, s"start watching invoker membership, prefix = $watchPrefix")(TransactionId.schedulerNanny)
+
+  watcher.watchMembership(watchPrefix) map {
     case MembershipEvent.Put(_, value) =>
       val reg = value.parseJson.convertTo[InvokerRegistration]
       NewInvoker(reg)
@@ -46,7 +50,7 @@ class InvokerResource(config: MetadataStoreConfig)(implicit logging: Logging) ex
       val pattern = "(\\d+)$".r
       val pattern(instance) = key
       InvokerOffline(instance.toInt)
-  } ask self
+  } ask self runWith Sink.ignore
 
   override def receive: Receive = {
     case NewInvoker(reg) =>

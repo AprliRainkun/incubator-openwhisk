@@ -67,6 +67,7 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
 
   when(InitingFlow) {
     case Event(FlowReady(send, messages), NoData) =>
+      logging.info(this, s"activation flow established for action $action")
       messages runForeach { m =>
         self ! NewMessage(m)
       }

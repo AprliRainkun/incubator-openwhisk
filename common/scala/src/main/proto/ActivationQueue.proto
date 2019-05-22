@@ -55,6 +55,7 @@ message FetchActivationResponse {
 message CreateQueueRequest {
     TransactionId tid = 1;
     ActionIdentifier action = 2;
+    string memory = 3;
 }
 
 message CreateQueueResponse {

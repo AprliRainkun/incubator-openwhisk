@@ -97,7 +97,7 @@ http {
     }
 
     server {
-        listen 443 default ssl;
+        listen 443 http2 default ssl;
 
         # Match namespace, note while OpenWhisk allows a richer character set for a
         # namespace, not all those characters are permitted in the (sub)domain name.

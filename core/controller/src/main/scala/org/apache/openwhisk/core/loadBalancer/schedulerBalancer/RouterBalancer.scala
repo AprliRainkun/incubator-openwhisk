@@ -31,7 +31,9 @@ class RouterBalancer(config: WhiskConfig,
   private val queueMetadataStore = QueueMetadataStore.connect(metadataStoreConfig)
   private val schedulerClientPool = new ClientPool[QueueServiceClient]
 
-  private val placeholder = InvokerInstanceId(0, None, None, ByteSize.fromString("256GB"))
+  private val placeholder = InvokerInstanceId(0, None, None, ByteSize.fromString(s"${256 * 1024} MB"))
+
+  logging.info(this, "start router balancer")
 
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
@@ -39,14 +41,16 @@ class RouterBalancer(config: WhiskConfig,
     // then setup up activation
     // finally push the message to scheduler
     val actionInfo = action.docinfo
+    logging.info(this, s"start routing action ${actionInfo.id}")
 
-    for {
+    val routeFuture = for {
       QueueRegistration(host, port) <- queueMetadataStore.getEndPoint(actionInfo)
       client = schedulerClientPool.getClient(host, port)
       resultFuture = setupActivation(msg, action, placeholder)
       rpcTid = RpcTid(transid.toJson.compactPrint)
       actionId = ActionIdentifier(actionInfo.id.asString, actionInfo.rev.asString)
       req = RpcActivation(Some(rpcTid), Some(actionId), msg.toJson.compactPrint)
+      _ = logging.info(this, s"route activation to $host")
       _ <- client.put(req) transform {
         case Success(resp) =>
           val status = resp.status.head
@@ -58,6 +62,11 @@ class RouterBalancer(config: WhiskConfig,
         case f @ _ => f
       }
     } yield resultFuture
+
+    routeFuture andThen {
+      case Failure(t) => logging.error(this, s"failed to route action, ${t.getMessage}")
+      case _          =>
+    }
   }
 
   override protected val invokerPool: ActorRef = actorSystem.actorOf(Props.empty)
@@ -78,6 +87,5 @@ object RouterBalancer extends LoadBalancerProvider {
     mat: ActorMaterializer): LoadBalancer =
     new RouterBalancer(whiskConfig, createFeedFactory(whiskConfig, instance), instance)
 
-  override def requiredProperties: Map[String, String] =
-    ExecManifest.requiredProperties ++ WhiskConfig.wskApiHost
+  override def requiredProperties: Map[String, String] = WhiskConfig.kafkaHosts
 }
