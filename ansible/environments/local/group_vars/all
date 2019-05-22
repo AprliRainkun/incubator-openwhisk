@@ -39,4 +39,6 @@ jmxremote_enabled: false
 controller_loadbalancer_spi: "org.apache.openwhisk.core.loadBalancer.schedulerBalancer.RouterBalancer"
 scheduler_action_container_reserve: 10
 invoker_user_memory: 10240m
-schedueler_max_queue_length: 100
+scheduler_max_queue_length: 200
+scheduler_window_throttle_millis: 10
+scheduler_buffer_limit: 5

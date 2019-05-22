@@ -10,6 +10,7 @@ import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
 import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.grpc.WindowAdvertisement.Message
 import org.apache.openwhisk.grpc._
+import pureconfig._
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
@@ -134,9 +135,10 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
   protected def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
     queueMetadataStore.getEndPoint(action) flatMap {
       case QueueRegistration(host, port) =>
+        val throttleMillis = loadConfigOrThrow[Int]("whisk.scheduler.window-throttle-millis")
         val (sendFuture, sizes) = Source
           .fromGraph(new ConflatedTickerStage)
-          .throttle(1, 20.millis)
+          .throttle(1, throttleMillis.millis)
           .map(b => WindowAdvertisement(Message.WindowsSize(b)))
           .preMaterialize()
         val actionId = ActionIdentifier(action.id.asString, action.rev.asString)

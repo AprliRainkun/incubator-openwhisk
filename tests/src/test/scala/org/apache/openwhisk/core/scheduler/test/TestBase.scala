@@ -78,7 +78,7 @@ trait LocalScheduler { this: TestBase =>
   override def beforeAll(): Unit = {
     implicit val logging: Logging = new AkkaLogging(akka.event.Logging.getLogger(sys, this))
 
-    val schedulerConfig: SchedulerConfig = SchedulerConfig(local, schedulerPort, 0, 100)
+    val schedulerConfig: SchedulerConfig = SchedulerConfig(local, schedulerPort, 0, 10000)
 
     val manager = system.actorOf(QueueManager.props(schedulerConfig))
     val invokerResourceStub = TestProbe()

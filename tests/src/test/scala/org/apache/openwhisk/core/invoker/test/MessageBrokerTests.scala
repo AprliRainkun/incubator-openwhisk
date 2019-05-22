@@ -199,9 +199,8 @@ class MessageBrokerTests extends TestBase("MessageBrokerTests") with LocalSchedu
   }
 
   private def createQueue(action: DocInfo): Future[CreateQueueResponse] = {
-    val tid = TransactionId("tid_000")
     val actionId = ActionIdentifier(action.id.asString, action.rev.asString)
-    val req = CreateQueueRequest(Some(tid), Some(actionId))
+    val req = CreateQueueRequest(Some(rpcTid), Some(actionId), "256 MB")
     schedulerClient.create(req)
   }
 

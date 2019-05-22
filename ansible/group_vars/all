@@ -180,6 +180,8 @@ scheduler:
   extraEnv: "{{ scheduler_extraEnv | default({}) }}"
   actionContainerReserve: 1
   maxQueueLength: 20
+  windowsThrottleMillis: 20
+  bufferLimit: 5
 
 invoker:
   dir:

@@ -10,6 +10,7 @@ import org.apache.openwhisk.core.database._
 import org.apache.openwhisk.core.database.etcd.QueueMetadataStore
 import org.apache.openwhisk.core.entity.ExecManifest.ImageName
 import org.apache.openwhisk.core.entity._
+import pureconfig._
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -46,11 +47,12 @@ class PoolManager(factory: (TransactionId, String, ImageName, Boolean, ByteSize,
   implicit val ex: ExecutionContext = sys.dispatcher
 
   private var pools = Map.empty[DocInfo, ActorRef]
+  private val bufferLimit = loadConfigOrThrow[Int]("whisk.scheduler.buffer-limit")
 
   override def receive: Receive = {
     case command @ AllocateContainer(_, entity, _) =>
       if (!pools.contains(entity)) {
-        val messageBroker = sys.actorOf(MessageBroker.props(entity, 5, queueMetadataStore))
+        val messageBroker = sys.actorOf(MessageBroker.props(entity, bufferLimit, queueMetadataStore))
         val pool =
           sys.actorOf(
             ContainerPoolForAction.props(messageBroker, factory, entityStore, activationStore, poolConfig, producer))

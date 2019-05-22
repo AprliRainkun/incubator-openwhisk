@@ -8,7 +8,9 @@ import org.apache.openwhisk.core.entity.{DocInfo, QueueRegistration}
 import org.apache.openwhisk.grpc.etcd._
 import spray.json._
 
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Success
 
 object QueueMetadataStore {
   def connect(config: MetadataStoreConfig)(implicit sys: ActorSystem,
@@ -20,6 +22,8 @@ object QueueMetadataStore {
 }
 
 class QueueMetadataStore(config: MetadataStoreConfig, kvClient: KVClient) {
+  private val endpointCache = TrieMap.empty[DocInfo, QueueRegistration]
+
   def txnMarkCreating(action: DocInfo): Future[Unit] = {
     val _ = config.queueMarkerKeyTemplate.format(action.id.asString, action.rev.asString)
     //TODO: implement check
@@ -35,7 +39,25 @@ class QueueMetadataStore(config: MetadataStoreConfig, kvClient: KVClient) {
     kvClient.put(req).map(_ => ())
   }
 
-  def getEndPoint(action: DocInfo)(implicit ex: ExecutionContext): Future[QueueRegistration] = {
+  def getEndPoint(action: DocInfo, refreshCache: Boolean = false)(
+    implicit ex: ExecutionContext): Future[QueueRegistration] = {
+
+    def readDbAndUpdateCache() = readDatabase(action) andThen {
+      case Success(reg) => endpointCache.put(action, reg)
+      case _            =>
+    }
+    if (refreshCache) {
+      readDbAndUpdateCache()
+    } else {
+      endpointCache.get(action) match {
+        case Some(reg) => Future successful reg
+        case None =>
+          readDbAndUpdateCache()
+      }
+    }
+  }
+
+  private def readDatabase(action: DocInfo)(implicit ex: ExecutionContext): Future[QueueRegistration] = {
     val key = config.queueEndpointKeyTemplate.format(action.id.asString, action.rev.asString)
     val req = RangeRequest(key = ByteString.copyFromUtf8(key))
     kvClient.range(req) flatMap { resp =>

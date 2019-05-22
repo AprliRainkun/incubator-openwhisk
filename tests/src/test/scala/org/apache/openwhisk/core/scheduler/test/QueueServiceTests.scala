@@ -28,7 +28,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   "Queue creation service" should {
     "be reachable" in {
       val actionId = ActionIdentifier("ns/pkg/act", "1")
-      val req = CreateQueueRequest(Some(tid), Some(actionId))
+      val req = CreateQueueRequest(Some(tid), Some(actionId), "256 MB")
 
       schedulerClient.create(req) map { resp =>
         resp.status.value.statusCode should be(200)
@@ -39,7 +39,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
 
     "create a queue and write endpoint to etcd" in {
       val actionId = ActionIdentifier("ns/pkg/act2", "1")
-      val req = CreateQueueRequest(Some(tid), Some(actionId))
+      val req = CreateQueueRequest(Some(tid), Some(actionId), "256 MB")
 
       schedulerClient.create(req) flatMap { resp =>
         resp.status.value.statusCode should be(200)
@@ -223,7 +223,7 @@ class QueueServiceTests extends TestBase("QueueCreationTests") with LocalSchedul
   }
 
   private def createQueue(actionId: ActionIdentifier): Future[CreateQueueResponse] = {
-    val req = CreateQueueRequest(Some(tid), Some(actionId))
+    val req = CreateQueueRequest(Some(tid), Some(actionId), "256 MB")
     schedulerClient.create(req)
   }
 
