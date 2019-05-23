@@ -40,7 +40,7 @@ controller_loadbalancer_spi: "org.apache.openwhisk.core.loadBalancer.schedulerBa
 
 invoker_user_memory: 10240m
 invoker_buffer_limit: 5
+invoker_windows_throttle_millis: 10
 
 scheduler_action_container_reserve: 10
 scheduler_max_queue_length: 200
-scheduler_window_throttle_millis: 10

@@ -180,7 +180,6 @@ scheduler:
   extraEnv: "{{ scheduler_extraEnv | default({}) }}"
   actionContainerReserve: 1
   maxQueueLength: 20
-  windowsThrottleMillis: 20
 
 invoker:
   dir:
@@ -190,6 +189,7 @@ invoker:
   grpc:
     port: 13001
   bufferLimit: 5
+  windowsThrottleMillis: 20
   heap: "{{ invoker_heap | default('2g') }}"
   arguments: "{{ invoker_arguments | default('') }}"
   userMemory: "{{ invoker_user_memory | default('2048m') }}"

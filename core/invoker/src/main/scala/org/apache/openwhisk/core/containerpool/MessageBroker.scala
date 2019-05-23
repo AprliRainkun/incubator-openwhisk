@@ -135,7 +135,7 @@ class MessageBroker(action: DocInfo, bufferLimit: Int, queueMetadataStore: Queue
   protected def establishFetchFlow(): Future[(TickerSendEnd, Source[String, NotUsed])] = {
     queueMetadataStore.getEndPoint(action) flatMap {
       case QueueRegistration(host, port) =>
-        val throttleMillis = loadConfigOrThrow[Int]("whisk.scheduler.window-throttle-millis")
+        val throttleMillis = loadConfigOrThrow[Int]("whisk.invoker.window-throttle-millis")
         val (sendFuture, sizes) = Source
           .fromGraph(new ConflatedTickerStage)
           .throttle(1, throttleMillis.millis)

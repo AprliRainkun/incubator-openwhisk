@@ -77,8 +77,6 @@
         "{{ scheduler_action_container_reserve | default(scheduler.actionContainerReserve) }}"
       "CONFIG_whisk_scheduler_maxQueueLength":
         "{{ scheduler_max_queue_length | default(scheduler.maxQueueLength) }}"
-      "CONFIG_whisk_scheduler_windowThrottleMillis":
-        "{{ scheduler_window_throttle_millis | default(scheduler.windowsThrottleMillis ) }}"
       "METRICS_KAMON": "{{ metrics.kamon.enabled | default(false) | string }}"
       "METRICS_KAMON_TAGS": "{{ metrics.kamon.tags | default() | string }}"
       "METRICS_LOG": "{{ metrics.log.enabled | default(false) | string }}"
