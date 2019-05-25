@@ -75,7 +75,8 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
       } else {
         val rng = new Random
         val idx = rng.nextInt(schedulers.size)
-        val scheduler = schedulers(idx)
+        val (_, scheduler) = schedulers.toIndexedSeq(idx)
+        logging.info(this, s"reply with scheduler ${scheduler.instance}")
         sender ! CreateQueueResult(Right(scheduler))
       }
   }
