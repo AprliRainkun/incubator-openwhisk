@@ -3,7 +3,7 @@ package org.apache.openwhisk.core.database.etcd
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.grpc.GrpcClientSettings
-import akka.stream.Materializer
+import akka.stream.{Materializer, OverflowStrategy}
 import akka.stream.scaladsl.Source
 import com.google.protobuf.ByteString
 import org.apache.openwhisk.common.Logging
@@ -42,8 +42,10 @@ class MembershipWatcher(config: MetadataStoreConfig)(implicit sys: ActorSystem,
     }
     val initStream = Source.fromFuture(initSnapshot).mapConcat(_.toList)
     val watchStreamFut = revisionPromise.future map { revision =>
-      val watchReq = WatchRequest(CreateRequest(WatchCreateRequest(rangeStart, rangeEnd, startRevision = revision + 1)))
-      watchClient.watch(Source(List(watchReq))) mapConcat { event =>
+      val (reqSender, reqSource) = Source.queue[WatchRequest](2, OverflowStrategy.dropNew).preMaterialize()
+      val create = WatchRequest(CreateRequest(WatchCreateRequest(rangeStart, rangeEnd, startRevision = revision + 1)))
+      reqSender.offer(create)
+      watchClient.watch(reqSource) mapConcat { event =>
         logging.info(this, s"watch event received from etcd, count ${event.events.size}")
         event.events map { e =>
           val kv = e.kv.head
