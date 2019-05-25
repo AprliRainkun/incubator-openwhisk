@@ -42,7 +42,7 @@ class MembershipWatcher(config: MetadataStoreConfig)(implicit sys: ActorSystem,
     }
     val initStream = Source.fromFuture(initSnapshot).mapConcat(_.toList)
     val watchStreamFut = revisionPromise.future map { revision =>
-      val (reqSender, reqSource) = Source.queue[WatchRequest](2, OverflowStrategy.dropNew).preMaterialize()
+      val (reqSender, reqSource) = Source.queue[WatchRequest](1, OverflowStrategy.fail).preMaterialize()
       val create = WatchRequest(CreateRequest(WatchCreateRequest(rangeStart, rangeEnd, startRevision = revision + 1)))
       reqSender.offer(create)
       watchClient.watch(reqSource) mapConcat { event =>

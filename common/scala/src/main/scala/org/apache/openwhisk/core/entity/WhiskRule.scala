@@ -126,7 +126,7 @@ case class WhiskRuleResponse(namespace: EntityPath,
  *
  * @param status, one of allowed status strings
  */
-class Status private (private val status: String) extends AnyVal {
+class   Status private (private val status: String) extends AnyVal {
   override def toString = status
 }
 

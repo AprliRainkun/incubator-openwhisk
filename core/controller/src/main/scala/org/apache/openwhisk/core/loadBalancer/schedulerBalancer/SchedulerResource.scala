@@ -1,18 +1,18 @@
 package org.apache.openwhisk.core.loadBalancer.schedulerBalancer
 
-import akka.actor.{Actor, ActorRef, ActorSystem, Props, Status}
-import akka.stream.{ActorMaterializer, Materializer}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.stream.scaladsl.Sink
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import org.apache.openwhisk.common.{Logging, TransactionId}
 import org.apache.openwhisk.core.database.etcd._
 import org.apache.openwhisk.core.entity._
 import spray.json._
 
-import scala.util.Random
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.util.Random
 
 // used for implicit injection
 final case class SchedulerResourceActor(actor: ActorRef)
@@ -26,6 +26,7 @@ object SchedulerResource {
   // private messages
   private case class NewScheduler(registration: SchedulerRegistration)
   private case class SchedulerOffline(instance: Int)
+  private case object Ack
 }
 
 class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) extends Actor {
@@ -51,7 +52,9 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
       val pattern = "(\\d+)$".r
       val pattern(instance) = key
       SchedulerOffline(instance.toInt)
-  } ask self runWith Sink.ignore
+  } map { e =>
+    self ! e
+  } runWith Sink.ignore
 
   override def receive: Receive = {
     case NewScheduler(reg) =>
@@ -59,13 +62,11 @@ class SchedulerResource(config: MetadataStoreConfig)(implicit logging: Logging) 
         logging.warn(this, s"scheduler $reg appeared again, queue might have lost")(TransactionId.loadbalancer)
       }
       schedulers += (reg.instance -> reg)
-      sender ! Status.Success(())
       logging.info(this, s"new scheduler discovered, reg: $reg")(TransactionId.loadbalancer)
     case SchedulerOffline(instance) =>
       if (schedulers.contains(instance)) {
         schedulers -= instance
       }
-      sender ! Status.Success(())
       logging.warn(this, s"scheduler $instance offline")(TransactionId.loadbalancer)
     case CreateQueue(tid, actionInfo) =>
       implicit val transid: TransactionId = tid

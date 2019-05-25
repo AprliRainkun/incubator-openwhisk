@@ -1,8 +1,8 @@
 package org.apache.openwhisk.core.scheduler
 
-import akka.actor.{Actor, ActorSystem, Props, Status}
-import akka.stream.{ActorMaterializer, Materializer}
+import akka.actor.{Actor, ActorSystem, Props}
 import akka.stream.scaladsl.Sink
+import akka.stream.{ActorMaterializer, Materializer}
 import akka.util.Timeout
 import org.apache.openwhisk.common.{Logging, TransactionId}
 import org.apache.openwhisk.core.database.etcd._
@@ -50,7 +50,9 @@ class InvokerResource(config: MetadataStoreConfig)(implicit logging: Logging) ex
       val pattern = "(\\d+)$".r
       val pattern(instance) = key
       InvokerOffline(instance.toInt)
-  } ask self runWith Sink.ignore
+  } map {e =>
+    self ! e
+  } runWith Sink.ignore
 
   override def receive: Receive = {
     case NewInvoker(reg) =>
@@ -58,14 +60,12 @@ class InvokerResource(config: MetadataStoreConfig)(implicit logging: Logging) ex
         invokers += (reg.instance -> reg)
         invokerPools += (reg.instance -> reg.userMemory)
       }
-      sender ! Status.Success(())
       logging.info(this, s"new invoker discovered, $reg")(TransactionId.schedulerNanny)
     case InvokerOffline(instance) =>
       if (invokers.contains(instance)) {
         invokers -= instance
         invokerPools -= instance
       }
-      sender ! Status.Success(())
       logging.warn(this, s"invoker offline, instance = $instance")(TransactionId.schedulerNanny)
     case ReserveMemory(tid, memory, replica) =>
       implicit val transid: TransactionId = tid
