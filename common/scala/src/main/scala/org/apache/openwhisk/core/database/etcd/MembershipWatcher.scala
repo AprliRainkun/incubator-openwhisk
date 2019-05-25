@@ -44,6 +44,7 @@ class MembershipWatcher(config: MetadataStoreConfig)(implicit sys: ActorSystem,
     val watchStreamFut = revisionPromise.future map { revision =>
       val watchReq = WatchRequest(CreateRequest(WatchCreateRequest(rangeStart, rangeEnd, startRevision = revision + 1)))
       watchClient.watch(Source(List(watchReq))) mapConcat { event =>
+        logging.info(this, s"watch event received from etcd, count ${event.events.size}")
         event.events map { e =>
           val kv = e.kv.head
           e.`type` match {
